@@ -404,6 +404,22 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         );
     }
 
+    /// @notice Get computed status for frontend display
+    function getNoteStatus(bytes32 noteId) external view returns (
+        State state,
+        uint8 observations,
+        uint256 nextObservationTime,
+        uint256 currentTriggerBps,
+        uint256 couponPerObsBps
+    ) {
+        Note storage note = _notes[noteId];
+        state = note.state;
+        observations = note.observations;
+        nextObservationTime = note.lastObservationTime + (OBS_INTERVAL_DAYS * 1 days);
+        currentTriggerBps = AUTOCALL_TRIGGER_BPS - (uint256(STEP_DOWN_BPS) * note.observations);
+        couponPerObsBps = note.totalCouponBps;
+    }
+
     // ----------------------------------------------------------------
     // Internal: state transitions
     // ----------------------------------------------------------------

@@ -32,6 +32,9 @@ contract CarryEngine is ICarryEngine, Ownable {
     /// @notice Tracks collected carry per note
     mapping(bytes32 => uint256) public totalCarryCollected;
 
+    /// @notice Per-note last collect timestamp to avoid double-counting lending carry
+    mapping(bytes32 => uint256) public lastCollectTimestamp;
+
     /// @notice Tracks Nado position IDs per note for funding collection
     struct NotePositions {
         bytes32[] positionIds;
@@ -84,10 +87,14 @@ contract CarryEngine is ICarryEngine, Ownable {
 
         // Source B: USDC lending on Tydro (pro-rata based on lending rate)
         uint256 lendingRatePerSec = tydro.getLendingRate();
-        uint256 elapsed = block.timestamp - (lastUpdateTimestamp > 0 ? lastUpdateTimestamp : block.timestamp);
+        uint256 noteLastCollect = lastCollectTimestamp[noteId];
+        uint256 elapsed = block.timestamp - (noteLastCollect > 0 ? noteLastCollect : block.timestamp);
         if (np.usdcLent > 0 && elapsed > 0) {
             lendingCarry = (np.usdcLent * lendingRatePerSec * elapsed) / 1e18;
         }
+
+        // Update per-note timestamp to avoid double-counting
+        lastCollectTimestamp[noteId] = block.timestamp;
 
         // Source C: Collateral yield (included in lending carry for simplicity)
 

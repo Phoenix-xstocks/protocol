@@ -113,6 +113,23 @@ contract XYieldVault is IXYieldVault, AccessControl, ReentrancyGuard {
         nonReentrant
         returns (uint256 requestId)
     {
+        requestId = _requestDeposit(amount, receiver, new address[](0));
+    }
+
+    /// @notice Request deposit with basket preference. User chooses their xStocks.
+    function requestDepositWithBasket(uint256 amount, address receiver, address[] calldata basket)
+        external
+        nonReentrant
+        returns (uint256 requestId)
+    {
+        require(basket.length >= 2 && basket.length <= 5, "invalid basket size");
+        requestId = _requestDeposit(amount, receiver, basket);
+    }
+
+    function _requestDeposit(uint256 amount, address receiver, address[] memory basket)
+        internal
+        returns (uint256 requestId)
+    {
         if (amount == 0) revert ZeroAmount();
         if (amount < MIN_NOTE_SIZE) revert BelowMinDeposit();
         if (amount > MAX_NOTE_SIZE) revert AboveMaxDeposit();
@@ -126,6 +143,7 @@ contract XYieldVault is IXYieldVault, AccessControl, ReentrancyGuard {
         req.depositor = msg.sender;
         req.receiver = receiver;
         req.amount = amount;
+        req.basket = basket; // user's basket preference (empty = operator chooses)
         req.requestedAt = block.timestamp;
         req.status = RequestStatus.Pending;
 

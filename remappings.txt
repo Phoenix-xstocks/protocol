@@ -1,0 +1,4 @@
+@openzeppelin/=lib/openzeppelin-contracts/
+@chainlink/=lib/chainlink/
+@sablier/v2-core/=lib/v2-core/
+forge-std/=lib/forge-std/src/

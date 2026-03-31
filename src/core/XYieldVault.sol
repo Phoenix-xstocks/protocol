@@ -190,8 +190,8 @@ contract XYieldVault is IXYieldVault, AccessControl, ReentrancyGuard {
             }
         }
 
-        // Mint NoteToken (for full amount — fees are protocol revenue, not holder cost reduction)
-        noteToken.mint(req.receiver, req.noteId, req.amount);
+        // Mint NoteToken for net amount (what the engine actually receives)
+        noteToken.mint(req.receiver, req.noteId, netAmount);
 
         // Transfer net USDC to engine for coupon payments and settlement
         usdc.safeTransfer(address(engine), netAmount);

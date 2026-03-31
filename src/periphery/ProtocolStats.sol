@@ -31,18 +31,22 @@ contract ProtocolStats {
         uint256 totalNotesCreated;
         uint256 tvl;
         uint256 maxDeposit;
-        uint256 reserveBalance;
+        uint256 reserveBalance;       // total including Euler yield
         uint256 engineUsdcBalance;
         uint256 vaultUsdcBalance;
+        uint256 reserveLevel;         // bps of TVL
     }
 
     /// @notice Get all protocol stats in a single call
-    function getStats() external view returns (Stats memory stats) {
+    function getStats(uint256 totalNotional) external view returns (Stats memory stats) {
         stats.totalNotesCreated = engine.getNoteCount();
         stats.tvl = vault.totalAssets();
         stats.maxDeposit = vault.maxDeposit(address(0));
         stats.reserveBalance = reserveFund.getBalance();
         stats.engineUsdcBalance = usdc.balanceOf(address(engine));
         stats.vaultUsdcBalance = usdc.balanceOf(address(vault));
+        stats.reserveLevel = totalNotional > 0
+            ? reserveFund.getLevel(totalNotional)
+            : 10000;
     }
 }

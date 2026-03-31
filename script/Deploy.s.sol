@@ -143,10 +143,10 @@ contract Deploy is Script {
         volOracle.grantRole(volOracle.UPDATER_ROLE(), deployer);
 
         // IssuanceGate: engine needs to call noteActivated/noteSettled
-        issuanceGate.transferOwnership(address(engine));
+        issuanceGate.setAuthorized(address(engine), true);
 
-        // HedgeManager: engine is owner for openHedge/closeHedge calls
-        hedgeManager.transferOwnership(address(engine));
+        // HedgeManager: engine needs to call openHedge/closeHedge
+        hedgeManager.setAuthorized(address(engine), true);
 
         // Transfer reserve ownership to epoch manager
         reserveFund.transferOwnership(address(epochManager));

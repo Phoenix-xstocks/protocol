@@ -233,7 +233,8 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
             issuanceGate.checkIssuance(noteId, note.notional, note.basket);
         if (!approved) revert IssuanceNotApproved(reason);
 
-        // Open delta-neutral hedge before activating
+        // Approve and open delta-neutral hedge
+        usdc.safeIncreaseAllowance(address(hedgeManager), note.notional);
         hedgeManager.openHedge(noteId, note.basket, note.notional);
 
         // Update issuance gate counters

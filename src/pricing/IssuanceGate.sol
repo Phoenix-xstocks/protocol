@@ -82,12 +82,24 @@ contract IssuanceGate is IIssuanceGate, Ownable {
         return (true, "");
     }
 
-    function noteActivated(uint256 notional) external onlyOwner {
+    /// @notice Authorized callers (AutocallEngine)
+    mapping(address => bool) public authorized;
+
+    function setAuthorized(address account, bool status) external onlyOwner {
+        authorized[account] = status;
+    }
+
+    modifier onlyAuthorizedOrOwner() {
+        require(msg.sender == owner() || authorized[msg.sender], "not authorized");
+        _;
+    }
+
+    function noteActivated(uint256 notional) external onlyAuthorizedOrOwner {
         activeNoteCount++;
         totalNotionalOutstanding += notional;
     }
 
-    function noteSettled(uint256 notional) external onlyOwner {
+    function noteSettled(uint256 notional) external onlyAuthorizedOrOwner {
         require(activeNoteCount > 0, "no active notes");
         require(totalNotionalOutstanding >= notional, "notional underflow");
         activeNoteCount--;

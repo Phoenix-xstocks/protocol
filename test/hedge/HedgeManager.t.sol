@@ -189,7 +189,9 @@ contract HedgeManagerTest is Test {
         hedge.setPairIndex(address(tslax), 2);
         hedge.setPairIndex(address(metax), 3);
 
-        usdc.mint(address(hedge), NOTIONAL);
+        // Mint USDC to test contract (caller) and approve hedge to pull
+        usdc.mint(owner, NOTIONAL * 10);
+        usdc.approve(address(hedge), type(uint256).max);
     }
 
     function test_openHedge() public {

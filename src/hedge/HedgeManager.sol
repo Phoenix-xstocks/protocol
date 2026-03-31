@@ -27,6 +27,18 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
     IOneInchSwapper public swapper;
     IERC20 public usdc;
 
+    /// @notice Authorized callers (AutocallEngine, EpochManager, etc.)
+    mapping(address => bool) public authorized;
+
+    modifier onlyAuthorized() {
+        require(msg.sender == owner() || authorized[msg.sender], "not authorized");
+        _;
+    }
+
+    function setAuthorized(address account, bool status) external onlyOwner {
+        authorized[account] = status;
+    }
+
     struct StockHedge {
         address asset;
         uint256 spotAmount; // xStock quantity held
@@ -85,7 +97,7 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
         bytes32 noteId,
         address[] calldata basket,
         uint256 notional
-    ) external onlyOwner nonReentrant {
+    ) external onlyAuthorized nonReentrant {
         require(!notePaused[noteId], "note paused");
         require(!positions[noteId].active, "hedge already active");
         require(basket.length > 0, "empty basket");
@@ -97,6 +109,9 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
         pos.active = true;
         pos.stockCount = basket.length;
         pos.basket = basket;
+
+        // Pull USDC from caller (AutocallEngine) to fund the hedge
+        usdc.safeTransferFrom(msg.sender, address(this), notional);
 
         uint256 perStock = notional / basket.length;
         uint256 totalSpot;
@@ -134,7 +149,7 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
     }
 
     /// @inheritdoc IHedgeManager
-    function closeHedge(bytes32 noteId) external onlyOwner nonReentrant returns (uint256 recovered) {
+    function closeHedge(bytes32 noteId) external onlyAuthorized nonReentrant returns (uint256 recovered) {
         HedgePosition storage pos = positions[noteId];
         require(pos.active, "hedge not active");
 
@@ -160,6 +175,11 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
 
         int256 pnl = int256(recovered) - int256(pos.spotNotional);
         pos.active = false;
+
+        // Transfer recovered USDC back to caller (AutocallEngine)
+        if (recovered > 0) {
+            usdc.safeTransfer(msg.sender, recovered);
+        }
 
         emit HedgeClosed(noteId, recovered, pnl);
     }

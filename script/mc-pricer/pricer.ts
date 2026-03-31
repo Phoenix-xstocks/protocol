@@ -230,4 +230,35 @@ function main() {
   console.log(JSON.stringify(result, null, 2));
 }
 
-main();
+// --- CLI or HTTP server mode ---
+import * as http from "http";
+
+if (process.argv.includes("--serve")) {
+  const PORT = parseInt(process.env.PORT || "3000");
+  const server = http.createServer((req, res) => {
+    if (req.method === "POST" && req.url === "/price") {
+      let body = "";
+      req.on("data", (chunk: string) => (body += chunk));
+      req.on("end", () => {
+        try {
+          const inputs: MCInputs = JSON.parse(body);
+          const result = runMonteCarlo(inputs);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(result));
+        } catch (e: any) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
+    } else if (req.method === "GET" && req.url === "/health") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "ok", version: "1.0.0" }));
+    } else {
+      res.writeHead(404);
+      res.end("Not found");
+    }
+  });
+  server.listen(PORT, () => console.log(`MC Pricer API running on port ${PORT}`));
+} else {
+  main();
+}

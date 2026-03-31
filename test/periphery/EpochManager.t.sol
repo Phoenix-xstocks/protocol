@@ -329,4 +329,65 @@ contract EpochManagerTest is Test {
         assertEq(result.p1Paid, 0);
         assertEq(result.p6Paid, 0);
     }
+
+    /// @notice When reserve is below minimum (3%), 100% of remaining goes to reserve
+    function test_waterfall_100pct_to_reserve_below_minimum() public {
+        // Reserve at 2% (below 3% minimum)
+        reserve = new ReserveFund(address(usdc), owner);
+        uint256 reserveAmount = 20_000e6; // 2% of $1M
+        usdc.mint(owner, reserveAmount);
+        usdc.approve(address(reserve), reserveAmount);
+        reserve.deposit(reserveAmount);
+
+        epoch = new EpochManager(
+            address(usdc), address(reserve), address(feeCollector),
+            address(carry), address(hedge), treasury, couponRecipient, owner
+        );
+        reserve.transferOwnership(address(epoch));
+
+        epoch.addNote(NOTE_1, TOTAL_NOTIONAL);
+
+        uint256 available = 10_000e6;
+        usdc.mint(address(epoch), available);
+
+        // No P1-P4 pending, all goes to P5/P6
+        epoch.setPendingAmounts(0, 0, 0, 0);
+
+        epoch.distributeWaterfall();
+
+        EpochManager.WaterfallResult memory result = epoch.getLastResult();
+        // Since reserve < 3%, P5 should get 100% of remaining (not 30%)
+        assertEq(result.p5Paid, available, "P5 should get 100% when reserve below minimum");
+        assertEq(result.p6Paid, 0, "P6 should get 0 when all goes to reserve");
+    }
+
+    /// @notice When reserve is healthy (above 3%), 30% goes to reserve, rest to treasury
+    function test_waterfall_30pct_to_reserve_above_minimum() public {
+        // Reserve at 5% (above 3% minimum)
+        reserve = new ReserveFund(address(usdc), owner);
+        uint256 reserveAmount = 50_000e6; // 5% of $1M
+        usdc.mint(owner, reserveAmount);
+        usdc.approve(address(reserve), reserveAmount);
+        reserve.deposit(reserveAmount);
+
+        epoch = new EpochManager(
+            address(usdc), address(reserve), address(feeCollector),
+            address(carry), address(hedge), treasury, couponRecipient, owner
+        );
+        reserve.transferOwnership(address(epoch));
+
+        epoch.addNote(NOTE_1, TOTAL_NOTIONAL);
+
+        uint256 available = 10_000e6;
+        usdc.mint(address(epoch), available);
+
+        epoch.setPendingAmounts(0, 0, 0, 0);
+
+        epoch.distributeWaterfall();
+
+        EpochManager.WaterfallResult memory result = epoch.getLastResult();
+        // Reserve healthy: P5 = 30% of 10000 = 3000
+        assertEq(result.p5Paid, 3_000e6, "P5 should get 30% when reserve healthy");
+        assertEq(result.p6Paid, 7_000e6, "P6 gets the rest");
+    }
 }

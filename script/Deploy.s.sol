@@ -24,7 +24,6 @@ import { NadoAdapter } from "../src/integrations/NadoAdapter.sol";
 import { TydroAdapter } from "../src/integrations/TydroAdapter.sol";
 import { OneInchSwapper } from "../src/integrations/OneInchSwapper.sol";
 import { ChainlinkPriceFeed } from "../src/integrations/ChainlinkPriceFeed.sol";
-import { SablierStream } from "../src/integrations/SablierStream.sol";
 
 // Periphery
 import { ReserveFund } from "../src/periphery/ReserveFund.sol";
@@ -45,7 +44,6 @@ contract Deploy is Script {
     address constant MOCK_NADO_PERP = address(0x1001);
     address constant MOCK_TYDRO_POOL = address(0x1002);
     address constant MOCK_1INCH_ROUTER = address(0x1003);
-    address constant MOCK_SABLIER = address(0x1004);
     address constant MOCK_VERIFIER_PROXY = address(0x1005);
     address constant MOCK_CRE_ROUTER = address(0x1006);
 
@@ -84,9 +82,6 @@ contract Deploy is Script {
 
         ChainlinkPriceFeed priceFeed = new ChainlinkPriceFeed(MOCK_VERIFIER_PROXY, deployer);
         console.log("ChainlinkPriceFeed:", address(priceFeed));
-
-        SablierStream sablier = new SablierStream(MOCK_SABLIER, USDC, deployer);
-        console.log("SablierStream:", address(sablier));
 
         // ---- 3. Hedge layer ----
         HedgeManager hedgeManager = new HedgeManager(
@@ -155,7 +150,6 @@ contract Deploy is Script {
         console.log("TydroAdapter:       ", address(tydro));
         console.log("OneInchSwapper:     ", address(swapper));
         console.log("ChainlinkPriceFeed: ", address(priceFeed));
-        console.log("SablierStream:      ", address(sablier));
         console.log("HedgeManager:       ", address(hedgeManager));
         console.log("CarryEngine:        ", address(carryEngine));
         console.log("ReserveFund:        ", address(reserveFund));

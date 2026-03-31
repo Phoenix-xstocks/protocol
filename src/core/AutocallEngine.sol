@@ -162,7 +162,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         onlyRole(VAULT_ROLE)
         returns (bytes32 noteId)
     {
-        if (basket.length != 3) revert InvalidBasket();
+        if (basket.length < 2 || basket.length > 5) revert InvalidBasket();
         require(notional > 0, "zero notional");
 
         noteId = keccak256(abi.encodePacked(basket, notional, holder, block.timestamp, noteCount));

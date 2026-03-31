@@ -153,19 +153,16 @@ contract EndToEndTest is Test {
         noteToken.grantRole(noteToken.MINTER_ROLE(), address(vault));
         noteToken.grantRole(noteToken.BURNER_ROLE(), address(engine));
 
-        // Configure basket
-        basket = new address[](3);
-        basket[0] = address(0xA);
-        basket[1] = address(0xB);
-        basket[2] = address(0xC);
+        // Configure 2-token basket (wQQQx + wSPYx — real testnet tokens)
+        basket = new address[](2);
+        basket[0] = address(0xA); // wQQQx
+        basket[1] = address(0xB); // wSPYx
 
         engine.setFeedId(address(0xA), FEED_A);
         engine.setFeedId(address(0xB), FEED_B);
-        engine.setFeedId(address(0xC), FEED_C);
 
-        priceFeed.setPrice(FEED_A, 100e8);
-        priceFeed.setPrice(FEED_B, 200e8);
-        priceFeed.setPrice(FEED_C, 300e8);
+        priceFeed.setPrice(FEED_A, 450e8); // QQQ ~$450
+        priceFeed.setPrice(FEED_B, 550e8); // SPY ~$550
 
         // Fund user
         usdc.mint(user, 100_000e6);
@@ -210,10 +207,9 @@ contract EndToEndTest is Test {
         });
         cre.setPricing(noteId, pricing);
 
-        int256[] memory initialPrices = new int256[](3);
-        initialPrices[0] = 100e8;
-        initialPrices[1] = 200e8;
-        initialPrices[2] = 300e8;
+        int256[] memory initialPrices = new int256[](2);
+        initialPrices[0] = 450e8; // QQQ
+        initialPrices[1] = 550e8; // SPY
 
         vm.prank(keeper);
         engine.priceNote(noteId, initialPrices);
@@ -277,10 +273,9 @@ contract EndToEndTest is Test {
         });
         cre.setPricing(noteId, pricing);
 
-        int256[] memory initialPrices = new int256[](3);
-        initialPrices[0] = 100e8;
-        initialPrices[1] = 200e8;
-        initialPrices[2] = 300e8;
+        int256[] memory initialPrices = new int256[](2);
+        initialPrices[0] = 450e8; // QQQ
+        initialPrices[1] = 550e8; // SPY
 
         vm.prank(keeper);
         engine.priceNote(noteId, initialPrices);
@@ -295,8 +290,8 @@ contract EndToEndTest is Test {
         // Fund engine
         usdc.mint(address(engine), depositAmount * 2);
 
-        // Drop token C to 40% — below KI barrier (50%)
-        priceFeed.setPrice(FEED_C, 120e8); // 40% of 300e8
+        // Drop wSPYx to 40% of initial (550e8 -> 220e8)
+        priceFeed.setPrice(FEED_B, 220e8); // 40% of 550
 
         // Run 6 observations with 30-day gaps
         uint256 t = block.timestamp;
@@ -346,10 +341,9 @@ contract EndToEndTest is Test {
         });
         cre.setPricing(noteId, pricing);
 
-        int256[] memory prices = new int256[](3);
-        prices[0] = 100e8;
-        prices[1] = 200e8;
-        prices[2] = 300e8;
+        int256[] memory prices = new int256[](2);
+        prices[0] = 450e8;
+        prices[1] = 550e8;
 
         vm.prank(keeper);
         engine.priceNote(noteId, prices);
@@ -363,8 +357,8 @@ contract EndToEndTest is Test {
 
         usdc.mint(address(engine), depositAmount * 3);
 
-        // Set prices to 80% — above coupon barrier (70%), below autocall (100%)
-        priceFeed.setPrice(FEED_B, 160e8); // 80% of 200e8
+        // Set wSPYx to 80% — above coupon barrier (70%), below autocall (100%)
+        priceFeed.setPrice(FEED_B, 440e8); // 80% of 550e8
 
         uint256 userBalBefore = usdc.balanceOf(user);
         uint256 t = block.timestamp;
@@ -438,10 +432,9 @@ contract EndToEndTest is Test {
         });
         cre.setPricing(noteId, pricing);
 
-        int256[] memory prices = new int256[](3);
-        prices[0] = 100e8;
-        prices[1] = 200e8;
-        prices[2] = 300e8;
+        int256[] memory prices = new int256[](2);
+        prices[0] = 450e8;
+        prices[1] = 550e8;
 
         vm.prank(keeper);
         engine.priceNote(noteId, prices);
@@ -490,8 +483,8 @@ contract EndToEndTest is Test {
         });
         cre.setPricing(noteId, pricing);
 
-        int256[] memory prices = new int256[](3);
-        prices[0] = 100e8; prices[1] = 200e8; prices[2] = 300e8;
+        int256[] memory prices = new int256[](2);
+        prices[0] = 450e8; prices[1] = 550e8;
 
         vm.prank(keeper);
         engine.priceNote(noteId, prices);
@@ -501,7 +494,7 @@ contract EndToEndTest is Test {
         usdc.mint(address(engine), depositAmount * 3);
 
         // Obs 1-3: market crashes — miss coupons (60% perf)
-        priceFeed.setPrice(FEED_B, 120e8); // 60%
+        priceFeed.setPrice(FEED_B, 330e8); // 60% of 550e8
 
         uint256 t = block.timestamp;
         for (uint256 i = 0; i < 3; i++) {
@@ -515,7 +508,7 @@ contract EndToEndTest is Test {
         assertGt(memCoupon, 0, "3 missed coupons accumulated");
 
         // Obs 4: market recovers — autocall at 100%
-        priceFeed.setPrice(FEED_B, 200e8);
+        priceFeed.setPrice(FEED_B, 550e8); // back to 100%
         vm.warp(t + (3 * 31 days));
 
         uint256 balBefore = usdc.balanceOf(user);
@@ -560,8 +553,8 @@ contract EndToEndTest is Test {
         });
         cre.setPricing(noteId, pricing);
 
-        int256[] memory prices = new int256[](3);
-        prices[0] = 100e8; prices[1] = 200e8; prices[2] = 300e8;
+        int256[] memory prices = new int256[](2);
+        prices[0] = 450e8; prices[1] = 550e8;
 
         vm.prank(keeper);
         engine.priceNote(noteId, prices);

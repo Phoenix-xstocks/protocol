@@ -257,14 +257,32 @@ contract AutocallEngineTest is Test {
         assertEq(engine.getNoteCount(), 1);
     }
 
-    function test_createNote_invalid_basket_size() public {
-        address[] memory smallBasket = new address[](2);
-        smallBasket[0] = address(0xA);
-        smallBasket[1] = address(0xB);
+    function test_createNote_invalid_basket_size_too_small() public {
+        address[] memory tinyBasket = new address[](1);
+        tinyBasket[0] = address(0xA);
 
         vm.prank(vault);
         vm.expectRevert(AutocallEngine.InvalidBasket.selector);
-        engine.createNote(smallBasket, 10_000e6, holder);
+        engine.createNote(tinyBasket, 10_000e6, holder);
+    }
+
+    function test_createNote_invalid_basket_size_too_large() public {
+        address[] memory bigBasket = new address[](6);
+        for (uint i = 0; i < 6; i++) bigBasket[i] = address(uint160(0xA + i));
+
+        vm.prank(vault);
+        vm.expectRevert(AutocallEngine.InvalidBasket.selector);
+        engine.createNote(bigBasket, 10_000e6, holder);
+    }
+
+    function test_createNote_2_token_basket() public {
+        address[] memory basket2 = new address[](2);
+        basket2[0] = address(0xA);
+        basket2[1] = address(0xB);
+
+        vm.prank(vault);
+        bytes32 noteId = engine.createNote(basket2, 10_000e6, holder);
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Created));
     }
 
     function test_createNote_only_vault_role() public {

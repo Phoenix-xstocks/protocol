@@ -28,6 +28,7 @@ import { ChainlinkPriceFeed } from "../src/integrations/ChainlinkPriceFeed.sol";
 // Periphery
 import { ReserveFund } from "../src/periphery/ReserveFund.sol";
 import { EpochManager } from "../src/periphery/EpochManager.sol";
+import { ProtocolStats } from "../src/periphery/ProtocolStats.sol";
 import { FeeCollector } from "../src/periphery/FeeCollector.sol";
 
 /// @title Deploy
@@ -124,6 +125,11 @@ contract Deploy is Script {
 
         XYieldVault vault = new XYieldVault(deployer, USDC, address(engine), address(noteToken));
         console.log("XYieldVault:", address(vault));
+
+        ProtocolStats stats = new ProtocolStats(
+            address(engine), address(vault), address(reserveFund), USDC
+        );
+        console.log("ProtocolStats:", address(stats));
 
         // ---- 6. Grant roles ----
         // AutocallEngine: vault + operator can create notes, deployer is keeper

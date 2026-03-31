@@ -43,6 +43,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     uint16 public constant KI_BARRIER_BPS = 5_000; // 50%
     uint256 public constant MATURITY_DAYS = 180;
     uint256 public constant PRICE_MAX_STALENESS = 24 hours; // per spec section 15
+    uint256 public constant KI_SETTLE_DEADLINE = 7 days; // holder must choose within 7 days
 
     // ----------------------------------------------------------------
     // Note structure
@@ -59,6 +60,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         uint256 createdAt;
         uint256 maturityDate;
         uint256 lastObservationTime; // enforce minimum interval between observations
+        uint256 kiSettleStartTime; // when KI settlement window opened
         int256[] initialPrices; // initial spot prices for perf calc
     }
 
@@ -333,6 +335,27 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         _transition(noteId, State.Settled);
     }
 
+    /// @notice Admin force-settle KI if holder doesn't choose within deadline.
+    ///         Defaults to cash settlement to protect the holder.
+    function forceSettleKI(bytes32 noteId) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
+        Note storage note = _notes[noteId];
+        _requireState(noteId, State.KISettle);
+        require(
+            block.timestamp > note.kiSettleStartTime + KI_SETTLE_DEADLINE,
+            "KI settle deadline not reached"
+        );
+
+        uint256 recovered = hedgeManager.closeHedge(noteId);
+        uint256 worstPerfBps = _getWorstPerformance(note);
+        uint256 cashValue = (note.notional * worstPerfBps) / BPS;
+        uint256 payout = cashValue < recovered ? cashValue : recovered;
+        usdc.safeTransfer(note.holder, payout);
+
+        _burnNoteToken(noteId, note);
+        _transition(noteId, State.Settled);
+        emit NoteSettled(noteId, payout, false);
+    }
+
     // ----------------------------------------------------------------
     // Emergency: ACTIVE -> EMERGENCY_PAUSED -> ACTIVE
     // ----------------------------------------------------------------
@@ -522,6 +545,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     function _handleMaturity(bytes32 noteId, Note storage note, uint256 worstPerfBps) internal {
         if (worstPerfBps < KI_BARRIER_BPS) {
             // KI breached at maturity (European)
+            note.kiSettleStartTime = block.timestamp;
             _transition(noteId, State.KISettle);
         } else {
             // No KI -- settle at par + remaining coupons

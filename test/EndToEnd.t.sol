@@ -56,6 +56,8 @@ contract MockIssuanceGate is IIssuanceGate {
         return (approved, "");
     }
     function setApproved(bool _approved) external { approved = _approved; }
+    function noteActivated(uint256) external {}
+    function noteSettled(uint256) external {}
 }
 
 contract MockCouponCalculator is ICouponCalculator {
@@ -138,7 +140,8 @@ contract EndToEndTest is Test {
             address(couponCalc),
             address(priceFeed),
             address(volOracle),
-            address(carryEngine)
+            address(carryEngine),
+            address(noteToken)
         );
 
         vault = new XYieldVault(admin, address(usdc), address(engine), address(noteToken));

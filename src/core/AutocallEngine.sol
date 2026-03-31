@@ -12,6 +12,7 @@ import { IIssuanceGate } from "../interfaces/IIssuanceGate.sol";
 import { ICouponCalculator } from "../interfaces/ICouponCalculator.sol";
 import { IVolOracle } from "../interfaces/IVolOracle.sol";
 import { ICarryEngine } from "../interfaces/ICarryEngine.sol";
+import { NoteToken } from "./NoteToken.sol";
 
 /// @notice Minimal interface for reading latest verified prices.
 interface IPriceFeed {
@@ -76,6 +77,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     IPriceFeed public immutable priceFeed;
     IVolOracle public immutable volOracle;
     ICarryEngine public immutable carryEngine;
+    NoteToken public immutable noteToken;
 
     /// @notice Maps xStock token address -> Chainlink Data Streams feed ID
     mapping(address => bytes32) public feedIds;
@@ -118,7 +120,8 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         address _couponCalculator,
         address _priceFeed,
         address _volOracle,
-        address _carryEngine
+        address _carryEngine,
+        address _noteToken
     ) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         usdc = IERC20(_usdc);
@@ -129,6 +132,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         priceFeed = IPriceFeed(_priceFeed);
         volOracle = IVolOracle(_volOracle);
         carryEngine = ICarryEngine(_carryEngine);
+        noteToken = NoteToken(_noteToken);
     }
 
     /// @notice Set the Chainlink feed ID for an xStock token. Admin only.
@@ -229,6 +233,9 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         // Open delta-neutral hedge before activating
         hedgeManager.openHedge(noteId, note.basket, note.notional);
 
+        // Update issuance gate counters
+        issuanceGate.noteActivated(note.notional);
+
         _transition(noteId, State.Active);
     }
 
@@ -309,18 +316,16 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         uint256 worstPerfBps = _getWorstPerformance(note);
 
         if (preferPhysical) {
-            // Physical delivery: transfer recovered USDC (representing xStock value)
-            // In production, would swap USDC -> worst xStock via swapper
             usdc.safeTransfer(note.holder, recovered);
             emit NoteSettled(noteId, recovered, true);
         } else {
-            // Cash settlement at market value
             uint256 cashValue = (note.notional * worstPerfBps) / BPS;
             uint256 payout = cashValue < recovered ? cashValue : recovered;
             usdc.safeTransfer(note.holder, payout);
             emit NoteSettled(noteId, payout, false);
         }
 
+        _burnNoteToken(noteId, note);
         _transition(noteId, State.Settled);
     }
 
@@ -486,10 +491,10 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
 
     function _settleAutocall(bytes32 noteId, Note storage note) internal {
         uint256 recovered = hedgeManager.closeHedge(noteId);
-        // Return notional to holder (autocall = no KI, full principal)
         uint256 payout = note.notional < recovered ? note.notional : recovered;
         usdc.safeTransfer(note.holder, payout);
 
+        _burnNoteToken(noteId, note);
         _transition(noteId, State.Settled);
         emit NoteSettled(noteId, payout, false);
     }
@@ -518,7 +523,20 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         uint256 payout = note.notional < recovered ? note.notional : recovered;
         usdc.safeTransfer(note.holder, payout);
 
+        _burnNoteToken(noteId, note);
         _transition(noteId, State.Settled);
         emit NoteSettled(noteId, payout, false);
+    }
+
+    /// @notice Burn NoteToken + update issuance gate on settlement.
+    function _burnNoteToken(bytes32 noteId, Note storage note) internal {
+        if (address(noteToken) != address(0)) {
+            uint256 tokenBal = noteToken.balanceOf(note.holder, uint256(noteId));
+            if (tokenBal > 0) {
+                noteToken.burn(note.holder, noteId, tokenBal);
+            }
+        }
+        // Update issuance gate counters
+        issuanceGate.noteSettled(note.notional);
     }
 }

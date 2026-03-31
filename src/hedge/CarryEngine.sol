@@ -69,6 +69,10 @@ contract CarryEngine is ICarryEngine, Ownable {
             np.positionIds.push(positionIds[i]);
         }
         np.usdcLent = usdcLent;
+        // Initialize collect timestamp so first collectCarry has a valid elapsed period
+        if (lastCollectTimestamp[noteId] == 0) {
+            lastCollectTimestamp[noteId] = block.timestamp;
+        }
         emit PositionsRegistered(noteId, positionIds.length, usdcLent);
     }
 

@@ -7,4 +7,7 @@ interface IIssuanceGate {
         uint256 notional,
         address[] calldata basket
     ) external view returns (bool approved, string memory reason);
+
+    function noteActivated(uint256 notional) external;
+    function noteSettled(uint256 notional) external;
 }

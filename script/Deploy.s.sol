@@ -13,6 +13,7 @@ import { VolOracle } from "../src/pricing/VolOracle.sol";
 import { OptionPricer } from "../src/pricing/OptionPricer.sol";
 import { CREConsumer } from "../src/pricing/CREConsumer.sol";
 import { IssuanceGate } from "../src/pricing/IssuanceGate.sol";
+import { CouponCalculator } from "../src/pricing/CouponCalculator.sol";
 
 // Hedge
 import { HedgeManager } from "../src/hedge/HedgeManager.sol";
@@ -68,6 +69,9 @@ contract Deploy is Script {
         CREConsumer creConsumer = new CREConsumer(MOCK_CRE_ROUTER, address(optionPricer), deployer);
         console.log("CREConsumer:", address(creConsumer));
 
+        CouponCalculator couponCalculator = new CouponCalculator();
+        console.log("CouponCalculator:", address(couponCalculator));
+
         // ---- 2. Integration adapters ----
         NadoAdapter nado = new NadoAdapter(MOCK_NADO_PERP, USDC, deployer);
         console.log("NadoAdapter:", address(nado));
@@ -117,8 +121,9 @@ contract Deploy is Script {
 
         AutocallEngine engine = new AutocallEngine(
             deployer, USDC, address(hedgeManager), address(creConsumer),
-            address(issuanceGate), address(0), // CouponCalculator is library, pass zero
-            address(priceFeed), address(volOracle), address(carryEngine)
+            address(issuanceGate), address(couponCalculator),
+            address(priceFeed), address(volOracle), address(carryEngine),
+            address(noteToken)
         );
         console.log("AutocallEngine:", address(engine));
 

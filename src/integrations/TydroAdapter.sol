@@ -118,8 +118,8 @@ contract TydroAdapter is ITydroAdapter, Ownable, ReentrancyGuard {
     /// @notice Aave returns liquidity rate as a ray (1e27). Convert to wad (1e18) per-second.
     function getLendingRate() external view returns (uint256 ratePerSecond) {
         uint128 currentLiquidityRate = tydroPool.getCurrentLiquidityRate(address(usdc));
-        // ray / seconds / (ray_to_wad) = wad per second
-        ratePerSecond = uint256(currentLiquidityRate) / SECONDS_PER_YEAR / (RAY / 1e18);
+        // Multiply by 1e18 first to avoid truncation, then divide by RAY and seconds
+        ratePerSecond = (uint256(currentLiquidityRate) * 1e18) / RAY / SECONDS_PER_YEAR;
     }
 
     /// @inheritdoc ITydroAdapter

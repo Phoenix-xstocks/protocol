@@ -81,6 +81,9 @@ contract MockIssuanceGate is IIssuanceGate {
         approved = _approved;
         rejectReason = reason;
     }
+
+    function noteActivated(uint256) external {}
+    function noteSettled(uint256) external {}
 }
 
 contract MockCouponCalculator is ICouponCalculator {
@@ -182,7 +185,8 @@ contract AutocallEngineTest is Test {
             address(couponCalc),
             address(priceFeed),
             address(volOracle),
-            address(mockCarry)
+            address(mockCarry),
+            address(0) // noteToken — not needed for unit tests
         );
 
         engine.grantRole(engine.KEEPER_ROLE(), keeper);

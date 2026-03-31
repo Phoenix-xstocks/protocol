@@ -583,4 +583,346 @@ contract EndToEndTest is Test {
         uint256 engineBal = usdc.balanceOf(address(engine));
         assertEq(engineBal, depositAmount - expectedFees, "engine received net amount");
     }
+
+    // ================================================================
+    // Helper: creates a note through the full create->price->activate flow
+    // ================================================================
+
+    function _createAndActivateNote(address holder, uint256 depositAmount)
+        internal
+        returns (bytes32 noteId)
+    {
+        vm.startPrank(holder);
+        usdc.approve(address(vault), depositAmount);
+        vault.requestDeposit(depositAmount, holder);
+        vm.stopPrank();
+
+        vm.prank(operator);
+        noteId = engine.createNote(basket, depositAmount, holder);
+
+        PricingResult memory pricing = PricingResult({
+            putPremiumBps: 900,
+            kiProbabilityBps: 500,
+            expectedKILossBps: 200,
+            vegaBps: 100,
+            inputsHash: keccak256("test")
+        });
+        cre.setPricing(noteId, pricing);
+
+        int256[] memory prices = new int256[](2);
+        prices[0] = 450e8;
+        prices[1] = 550e8;
+
+        vm.prank(keeper);
+        engine.priceNote(noteId, prices);
+        vm.prank(keeper);
+        engine.activateNote(noteId);
+    }
+
+    // ================================================================
+    // 1. Multiple notes simultaneous: autocall, maturity, KI
+    // ================================================================
+
+    function test_e2e_multiple_notes_simultaneous() public {
+        address userA = address(0xA001);
+        address userB = address(0xA002);
+        address userC = address(0xA003);
+
+        uint256 depositA = 10_000e6;
+        uint256 depositB = 15_000e6;
+        uint256 depositC = 20_000e6;
+
+        // Fund all users
+        usdc.mint(userA, depositA);
+        usdc.mint(userB, depositB);
+        usdc.mint(userC, depositC);
+
+        // Grant operator the VAULT_ROLE on engine
+        engine.grantRole(engine.VAULT_ROLE(), operator);
+
+        // Create and activate all 3 notes
+        bytes32 noteA = _createAndActivateNote(userA, depositA);
+        bytes32 noteB = _createAndActivateNote(userB, depositB);
+        bytes32 noteC = _createAndActivateNote(userC, depositC);
+
+        // Fund engine for payouts
+        usdc.mint(address(engine), (depositA + depositB + depositC) * 3);
+
+        // --- Note A: autocall on observation 1 (prices at 100%) ---
+        vm.warp(block.timestamp + 31 days);
+        // Prices still at initial (450e8, 550e8) => 100% perf => autocall
+        uint256 balABefore = usdc.balanceOf(userA);
+        engine.observe(noteA);
+        assertEq(uint256(engine.getState(noteA)), uint256(State.Settled), "noteA should autocall");
+        assertGt(usdc.balanceOf(userA) - balABefore, 0, "userA gets payout");
+
+        // --- Note B: goes to maturity at 80% perf (no KI, no autocall) ---
+        priceFeed.setPrice(FEED_B, 440e8); // 80% of 550 => above coupon (70%), below autocall
+        uint256 tB = block.timestamp;
+        for (uint256 i = 0; i < 6; i++) {
+            vm.warp(tB + (i * 31 days));
+            engine.observe(noteB);
+        }
+        // 80% >= 50% KI barrier => NoKISettle => Settled
+        assertEq(uint256(engine.getState(noteB)), uint256(State.Settled), "noteB should settle at maturity");
+
+        // --- Note C: KI at maturity (40% perf) ---
+        priceFeed.setPrice(FEED_B, 220e8); // 40% of 550
+        uint256 tC = block.timestamp;
+        for (uint256 i = 0; i < 6; i++) {
+            vm.warp(tC + (i * 31 days));
+            engine.observe(noteC);
+        }
+        assertEq(uint256(engine.getState(noteC)), uint256(State.KISettle), "noteC should be KISettle");
+
+        // userC settles via cash
+        hedge.setRecoveredAmount(depositC);
+        uint256 balCBefore = usdc.balanceOf(userC);
+        vm.prank(userC);
+        engine.settleKI(noteC, false);
+        assertEq(uint256(engine.getState(noteC)), uint256(State.Settled), "noteC settled");
+        uint256 cashPayout = usdc.balanceOf(userC) - balCBefore;
+        // Cash = notional * 40% = 20000e6 * 4000/10000 = 8000e6
+        assertEq(cashPayout, 8_000e6, "noteC KI cash = 40% of notional");
+
+        // Verify independence: all three settled independently
+        assertEq(uint256(engine.getState(noteA)), uint256(State.Settled));
+        assertEq(uint256(engine.getState(noteB)), uint256(State.Settled));
+        assertEq(uint256(engine.getState(noteC)), uint256(State.Settled));
+    }
+
+    // ================================================================
+    // 2. TVL limit rejection
+    // ================================================================
+
+    function test_e2e_max_tvl_rejection() public {
+        // MAX_TVL = 5_000_000e6. Fill it up close to the limit.
+        // Each deposit can be at most MAX_NOTE_SIZE = 100_000e6.
+        // We need 50 deposits of 100_000e6 to reach exactly 5M.
+        // For efficiency, we do 49 deposits of 100_000e6 then one of 100_000e6
+        // to reach exactly the limit. Then the next should fail.
+
+        // Actually, _totalAssets only increases on claimDeposit, not requestDeposit.
+        // The TVL check is: _totalAssets + amount > MAX_TVL
+        // But _requestDeposit also checks this. So we need to actually claim deposits
+        // or we can just deposit near-limit amounts.
+        //
+        // Wait - looking more carefully, the TVL check in _requestDeposit uses _totalAssets.
+        // _totalAssets is updated in claimDeposit. So for requestDeposit, multiple requests
+        // can be made without the TVL check failing until claims happen.
+        //
+        // However, we can still test: fill TVL via claims, then next request fails.
+
+        engine.grantRole(engine.VAULT_ROLE(), operator);
+
+        // We'll do a simpler approach: create enough claims to fill TVL
+        // 50 users x 100_000e6 = 5_000_000e6
+        for (uint256 i = 0; i < 50; i++) {
+            address depositor = address(uint160(0xF000 + i));
+            usdc.mint(depositor, 100_000e6);
+
+            vm.startPrank(depositor);
+            usdc.approve(address(vault), 100_000e6);
+            uint256 reqId = vault.requestDeposit(100_000e6, depositor);
+            vm.stopPrank();
+
+            // Create the note for this deposit
+            vm.prank(operator);
+            bytes32 nId = engine.createNote(basket, 100_000e6, depositor);
+
+            PricingResult memory pricing = PricingResult({
+                putPremiumBps: 900,
+                kiProbabilityBps: 500,
+                expectedKILossBps: 200,
+                vegaBps: 100,
+                inputsHash: keccak256("test")
+            });
+            cre.setPricing(nId, pricing);
+
+            int256[] memory prices = new int256[](2);
+            prices[0] = 450e8;
+            prices[1] = 550e8;
+
+            vm.prank(keeper);
+            engine.priceNote(nId, prices);
+            vm.prank(keeper);
+            engine.activateNote(nId);
+            vm.warp(block.timestamp + 31 days);
+
+            vm.prank(operator);
+            vault.fulfillDeposit(reqId, nId, basket);
+
+            vm.prank(depositor);
+            vault.claimDeposit(reqId);
+        }
+
+        // TVL now at 5_000_000e6 (exactly MAX_TVL)
+        assertEq(vault.totalAssets(), 5_000_000e6, "TVL should be at max");
+
+        // Next deposit should revert with TVLExceeded
+        address extraUser = address(0xBBBB);
+        usdc.mint(extraUser, 1_000e6);
+        vm.startPrank(extraUser);
+        usdc.approve(address(vault), 1_000e6);
+        vm.expectRevert(abi.encodeWithSelector(XYieldVault.TVLExceeded.selector));
+        vault.requestDeposit(1_000e6, extraUser);
+        vm.stopPrank();
+    }
+
+    // ================================================================
+    // 3. Note cancel and refund
+    // ================================================================
+
+    function test_e2e_note_cancel_and_refund() public {
+        uint256 depositAmount = 10_000e6;
+
+        // User deposits
+        vm.startPrank(user);
+        usdc.approve(address(vault), depositAmount);
+        uint256 requestId = vault.requestDeposit(depositAmount, user);
+        vm.stopPrank();
+
+        assertEq(usdc.balanceOf(address(vault)), depositAmount, "vault holds USDC");
+
+        engine.grantRole(engine.VAULT_ROLE(), operator);
+
+        // Operator creates note
+        vm.prank(operator);
+        bytes32 noteId = engine.createNote(basket, depositAmount, user);
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Created));
+
+        // Admin cancels the note (before pricing/activation)
+        engine.cancelNote(noteId);
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Cancelled));
+
+        // The deposit request is still Pending in the vault (never fulfilled).
+        // Warp past 24h deadline so refund is available.
+        vm.warp(block.timestamp + 25 hours);
+
+        uint256 balBefore = usdc.balanceOf(user);
+        vault.refundDeposit(requestId);
+        uint256 balAfter = usdc.balanceOf(user);
+
+        assertEq(balAfter - balBefore, depositAmount, "full USDC refund");
+        assertEq(usdc.balanceOf(address(vault)), 0, "vault empty after refund");
+    }
+
+    // ================================================================
+    // 4. Step-down progression: exact boundary test
+    // ================================================================
+
+    function test_e2e_stepdown_progression() public {
+        uint256 depositAmount = 10_000e6;
+
+        engine.grantRole(engine.VAULT_ROLE(), operator);
+
+        bytes32 noteId = _createAndActivateNote(user, depositAmount);
+
+        usdc.mint(address(engine), depositAmount * 3);
+
+        // Obs 1 (observations=0 before trigger calc): trigger = 10000 - 200*0 = 10000 (100%)
+        // Set worst perf to exactly 99.99% (just below 100%) => no autocall
+        // 99% of 550e8 = 544.5e8 ≈ 544e8  (9980 bps perf)
+        // We need exactly < 10000 bps. 99% = 9900 bps. Let's use 99%.
+        // perf = currentPrice / initialPrice * BPS
+        // For FEED_B: perf = currentPrice / 550e8 * 10000
+        // We want perf = 9999 bps => currentPrice = 9999 * 550e8 / 10000 = 549.945e8
+        // But int192, so let's just set both feeds to just under initial.
+        // Actually, worst-of is min across basket. Both at 100% means min = 100%.
+        // At exactly 100% => autocall. So we need worst < 100%.
+        // Set FEED_A to 99% of 450e8 = 445.5e8 ~ 445e8 (perf = 445/450*10000 = 9888)
+        // That's below 100%, no autocall on obs 1.
+
+        // But for obs 2, trigger = 10000 - 200*1 = 9800 (98%).
+        // We want exactly 98%: perf = 9800. Set both at 98%.
+        // FEED_A at 98%: 450e8 * 98/100 = 441e8. perf = 441/450 * 10000 = 9800. Exact.
+        // FEED_B at 98%: 550e8 * 98/100 = 539e8. perf = 539/550 * 10000 = 9800. Exact.
+
+        // Obs 1: set to 99% of initial => perf = 9900, trigger = 10000 => no autocall
+        priceFeed.setPrice(FEED_A, int192(int256(450e8 * 99 / 100))); // 445.5e8 truncated to 445e8
+        priceFeed.setPrice(FEED_B, int192(int256(550e8 * 99 / 100))); // 544.5e8 truncated to 544e8
+
+        vm.warp(block.timestamp + 31 days);
+        engine.observe(noteId);
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Active), "obs1: no autocall at 99%");
+
+        // Verify obs count is now 1
+        (,,,,uint8 obsCount,,,,) = engine.getNote(noteId);
+        assertEq(obsCount, 1, "1 observation done");
+
+        // Obs 2: trigger = 10000 - 200*1 = 9800. Set perf to exactly 9800 bps (98%)
+        priceFeed.setPrice(FEED_A, int192(int256(uint256(450e8) * 9800 / 10000))); // 441e8
+        priceFeed.setPrice(FEED_B, int192(int256(uint256(550e8) * 9800 / 10000))); // 539e8
+
+        vm.warp(block.timestamp + 31 days);
+        engine.observe(noteId);
+        // perf = 9800 >= trigger 9800 => autocall
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Settled), "obs2: autocall at exactly 98%");
+    }
+
+    // ================================================================
+    // 5. Memory coupon full cycle: miss 5, pay all on 6th, mature at par
+    // ================================================================
+
+    function test_e2e_memory_coupon_full_cycle() public {
+        uint256 depositAmount = 10_000e6;
+
+        engine.grantRole(engine.VAULT_ROLE(), operator);
+
+        bytes32 noteId = _createAndActivateNote(user, depositAmount);
+
+        usdc.mint(address(engine), depositAmount * 5);
+
+        // Obs 1-5: miss coupons (perf < 70% coupon barrier, > 50% KI)
+        // Set worst to 60%: FEED_B at 60% of 550e8 = 330e8
+        // Also keep FEED_B below autocall trigger with step-down:
+        //   Obs 1 trigger=100%, Obs 2=98%, Obs 3=96%, Obs 4=94%, Obs 5=92%
+        // 60% is well below all triggers, so no autocall. Also above 50% KI.
+        priceFeed.setPrice(FEED_B, 330e8); // 60% of 550e8
+
+        uint256 t = block.timestamp;
+        for (uint256 i = 0; i < 5; i++) {
+            vm.warp(t + ((i + 1) * 31 days));
+            engine.observe(noteId);
+            assertEq(uint256(engine.getState(noteId)), uint256(State.Active), "should stay active");
+        }
+
+        // Check 5 missed base coupons accumulated in memory
+        (,,,,, uint256 memCoupon,,,) = engine.getNote(noteId);
+        // baseCouponBps = 700 (from mock). Each base coupon = 10000e6 * 700 * 30 / (365 * 10000)
+        uint256 expectedBaseCouponPerObs = (depositAmount * 700 * 30) / (365 * 10_000);
+        uint256 expectedTotalMemory = expectedBaseCouponPerObs * 5;
+        assertEq(memCoupon, expectedTotalMemory, "5 base coupons accumulated in memory");
+
+        // Obs 6 (final): hit coupon barrier => pay current coupon + all 5 memory coupons
+        // Then maturity check: perf >= 50% => NoKISettle => settle at par
+        // Set perf to 80% (above coupon barrier 70%, but below autocall trigger)
+        // Obs 6 trigger = 10000 - 200*5 = 9000 (90%). 80% < 90%, no autocall.
+        priceFeed.setPrice(FEED_B, 440e8); // 80% of 550e8
+
+        uint256 userBalBefore = usdc.balanceOf(user);
+        vm.warp(t + (6 * 31 days));
+        engine.observe(noteId);
+
+        // At obs 6 (last), perf 80% < trigger 90% => no autocall.
+        // Coupon barrier: 80% >= 70% => pay coupon + memory.
+        // Then observations = 6 >= MAX_OBSERVATIONS => maturity check.
+        // worstPerf 80% >= KI barrier 50% => NoKISettle => settle at par.
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Settled), "settled at maturity");
+
+        uint256 totalReceived = usdc.balanceOf(user) - userBalBefore;
+        // Current coupon (totalCouponBps=900): 10000e6 * 900 * 30 / (365 * 10000)
+        uint256 currentCoupon = (depositAmount * 900 * 30) / (365 * 10_000);
+        // Memory paid: 5 * baseCoupon
+        // Notional: 10000e6 (capped by recovered amount from hedge)
+        // NoKISettle also pays remaining memory before notional
+
+        // Total = currentCoupon + memoryPaid (from _payCoupon) + notional (from _settleNoKI)
+        // But _settleNoKI also pays note.memoryCoupon if > 0. Since _payCoupon already zeroed it,
+        // _settleNoKI memory portion = 0.
+        uint256 expectedTotal = currentCoupon + expectedTotalMemory + depositAmount;
+
+        // hedge.recoveredAmount defaults to 100_000e6, so payout = min(notional, recovered) = notional
+        assertEq(totalReceived, expectedTotal, "total = coupon + 5 memory + notional");
+    }
 }

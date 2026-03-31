@@ -1,0 +1,14 @@
+{
+  "name": "@xyield/mc-pricer",
+  "version": "1.0.0",
+  "description": "Monte Carlo worst-of put pricer for Phoenix Autocall",
+  "main": "pricer.ts",
+  "scripts": {
+    "price": "npx tsx pricer.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  }
+}

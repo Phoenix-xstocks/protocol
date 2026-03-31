@@ -40,6 +40,8 @@ contract MockReserveFund is IReserveFund {
     function getBalance() external pure returns (uint256) { return 1e6; }
     function getLevel(uint256) external view returns (uint256) { return level; }
     function getHaircutRatio(uint256) external pure returns (uint256) { return 10000; }
+    function isBelowMinimum(uint256) external view returns (bool) { return level < 300; }
+    function isCritical(uint256) external view returns (bool) { return level < 100; }
     function setLevel(uint256 _level) external { level = _level; }
 }
 

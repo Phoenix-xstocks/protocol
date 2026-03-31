@@ -221,9 +221,12 @@ contract EpochManager is IEpochManager, Ownable, ReentrancyGuard {
             available -= result.p4Paid;
         }
 
-        // P5 (JUNIOR): Reserve fund contribution (30% of remaining)
+        // P5 (JUNIOR): Reserve fund contribution
+        // Per spec section 12: 30% normally, 100% if reserve below minimum (3%)
         if (available > 0) {
-            uint256 reserveContrib = (available * RESERVE_CONTRIBUTION_BPS) / BPS;
+            bool belowMinimum = reserveFund.isBelowMinimum(totalNotionalOutstanding);
+            uint256 contribRate = belowMinimum ? BPS : RESERVE_CONTRIBUTION_BPS; // 100% or 30%
+            uint256 reserveContrib = (available * contribRate) / BPS;
             if (reserveContrib > 0) {
                 usdc.safeIncreaseAllowance(address(reserveFund), reserveContrib);
                 reserveFund.deposit(reserveContrib);

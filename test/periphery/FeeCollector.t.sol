@@ -3,172 +3,388 @@ pragma solidity ^0.8.24;
 
 import { Test } from "forge-std/Test.sol";
 import { FeeCollector } from "../../src/periphery/FeeCollector.sol";
-import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
-contract MockUSDC is ERC20 {
-    constructor() ERC20("Mock USDC", "USDC") {}
-    function mint(address to, uint256 amount) external { _mint(to, amount); }
-    function decimals() public pure override returns (uint8) { return 6; }
+contract MockUSDC {
+    string public name = "USD Coin";
+    string public symbol = "USDC";
+    uint8 public decimals = 6;
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        if (allowance[from][msg.sender] != type(uint256).max) {
+            allowance[from][msg.sender] -= amount;
+        }
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        return true;
+    }
 }
 
 contract FeeCollectorTest is Test {
-    FeeCollector public fc;
+    FeeCollector public collector;
     MockUSDC public usdc;
-    address public treasury = address(0xBEEF);
-    address public owner;
-    address public caller;
+
+    address owner = address(this);
+    address treasury = address(0xBEEF);
+    address nonOwner = address(0xDEAD);
 
     function setUp() public {
-        owner = address(this);
-        caller = address(this);
         usdc = new MockUSDC();
-        fc = new FeeCollector(address(usdc), treasury, owner);
+        collector = new FeeCollector(address(usdc), treasury, owner);
     }
 
-    // ================================================================
-    // Embedded fee: 0.5%
-    // ================================================================
-
-    function test_embeddedFee_correct_amount() public {
-        uint256 notional = 10_000e6;
-        usdc.mint(caller, notional);
-        usdc.approve(address(fc), notional);
-
-        uint256 fee = fc.collectEmbeddedFee(notional);
-        // 0.5% of 10000 = 50 USDC
-        assertEq(fee, 50e6, "embedded fee = 0.5%");
-        assertEq(usdc.balanceOf(treasury), 50e6, "treasury received fee");
+    /// @dev Mint USDC to owner and approve the collector to spend it
+    function _fundOwner(uint256 amount) internal {
+        usdc.mint(owner, amount);
+        usdc.approve(address(collector), amount);
     }
 
-    function test_embeddedFee_zero_notional() public {
-        uint256 fee = fc.collectEmbeddedFee(0);
+    // ---------------------------------------------------------------
+    // collectEmbeddedFee: 0.5% of notional
+    // ---------------------------------------------------------------
+    function test_collectEmbeddedFee_correctAmount() public {
+        uint256 notional = 1_000_000e6; // $1M
+        _fundOwner(notional);
+
+        uint256 fee = collector.collectEmbeddedFee(notional);
+
+        // 0.5% = 50 bps -> 1_000_000 * 50 / 10_000 = 5_000
+        assertEq(fee, 5_000e6, "embedded fee should be 0.5%");
+    }
+
+    function test_collectEmbeddedFee_transfersToTreasury() public {
+        uint256 notional = 1_000_000e6;
+        _fundOwner(notional);
+
+        uint256 treasuryBefore = usdc.balanceOf(treasury);
+        collector.collectEmbeddedFee(notional);
+        uint256 treasuryAfter = usdc.balanceOf(treasury);
+
+        assertEq(treasuryAfter - treasuryBefore, 5_000e6, "treasury should receive fee");
+    }
+
+    function test_collectEmbeddedFee_updatesTotalCollected() public {
+        uint256 notional = 1_000_000e6;
+        _fundOwner(notional);
+
+        collector.collectEmbeddedFee(notional);
+        assertEq(collector.totalCollected(), 5_000e6);
+    }
+
+    function test_collectEmbeddedFee_emitsEvent() public {
+        uint256 notional = 1_000_000e6;
+        _fundOwner(notional);
+
+        vm.expectEmit(false, false, false, true);
+        emit FeeCollector.EmbeddedFeeCollected(notional, 5_000e6);
+        collector.collectEmbeddedFee(notional);
+    }
+
+    function test_collectEmbeddedFee_zeroNotional() public {
+        uint256 fee = collector.collectEmbeddedFee(0);
+        assertEq(fee, 0);
+        assertEq(collector.totalCollected(), 0);
+    }
+
+    function test_collectEmbeddedFee_smallNotional() public {
+        // 100 USDC -> fee = 100e6 * 50 / 10000 = 500000 = 0.5 USDC
+        uint256 notional = 100e6;
+        _fundOwner(notional);
+
+        uint256 fee = collector.collectEmbeddedFee(notional);
+        assertEq(fee, 500000, "0.5% of 100 USDC = 0.5 USDC");
+    }
+
+    // ---------------------------------------------------------------
+    // collectOriginationFee: 0.1% of notional
+    // ---------------------------------------------------------------
+    function test_collectOriginationFee_correctAmount() public {
+        uint256 notional = 1_000_000e6;
+        _fundOwner(notional);
+
+        uint256 fee = collector.collectOriginationFee(notional);
+
+        // 0.1% = 10 bps -> 1_000_000 * 10 / 10_000 = 1_000
+        assertEq(fee, 1_000e6, "origination fee should be 0.1%");
+    }
+
+    function test_collectOriginationFee_transfersToTreasury() public {
+        uint256 notional = 1_000_000e6;
+        _fundOwner(notional);
+
+        uint256 treasuryBefore = usdc.balanceOf(treasury);
+        collector.collectOriginationFee(notional);
+        uint256 treasuryAfter = usdc.balanceOf(treasury);
+
+        assertEq(treasuryAfter - treasuryBefore, 1_000e6);
+    }
+
+    function test_collectOriginationFee_emitsEvent() public {
+        uint256 notional = 1_000_000e6;
+        _fundOwner(notional);
+
+        vm.expectEmit(false, false, false, true);
+        emit FeeCollector.OriginationFeeCollected(notional, 1_000e6);
+        collector.collectOriginationFee(notional);
+    }
+
+    function test_collectOriginationFee_zeroNotional() public {
+        uint256 fee = collector.collectOriginationFee(0);
         assertEq(fee, 0);
     }
 
-    // ================================================================
-    // Origination fee: 0.1%
-    // ================================================================
-
-    function test_originationFee_correct_amount() public {
-        uint256 notional = 10_000e6;
-        usdc.mint(caller, notional);
-        usdc.approve(address(fc), notional);
-
-        uint256 fee = fc.collectOriginationFee(notional);
-        // 0.1% of 10000 = 10 USDC
-        assertEq(fee, 10e6, "origination fee = 0.1%");
-        assertEq(usdc.balanceOf(treasury), 10e6);
-    }
-
-    // ================================================================
-    // Management fee: 0.25% annualized, pro-rata
-    // ================================================================
-
-    function test_managementFee_48h_epoch() public {
-        uint256 notional = 1_000_000e6;
-        uint256 elapsed = 48 hours;
-
-        // 0.25% ann * 48h / 365d = ~13.70 USDC on $1M
-        usdc.mint(caller, 100e6);
-        usdc.approve(address(fc), 100e6);
-
-        uint256 fee = fc.collectManagementFee(notional, elapsed);
-        // (1_000_000e6 * 25 * 172800) / (10000 * 31536000) = 13698... ~13.7 USDC
-        assertApproxEqAbs(fee, 13698e3, 1e3, "management fee ~13.7 USDC per 48h on $1M");
-        assertEq(usdc.balanceOf(treasury), fee);
-    }
-
-    function test_managementFee_fullYear() public {
+    // ---------------------------------------------------------------
+    // collectManagementFee: 0.25% annualized, pro-rata
+    // ---------------------------------------------------------------
+    function test_collectManagementFee_fullYear() public {
         uint256 notional = 1_000_000e6;
         uint256 elapsed = 365 days;
+        // fee = notional * 25 * 365days / (10000 * 365days) = notional * 25 / 10000
+        // = 1_000_000 * 25 / 10000 = 2_500 USDC
+        uint256 expectedFee = 2_500e6;
+        _fundOwner(expectedFee);
 
-        usdc.mint(caller, 10_000e6);
-        usdc.approve(address(fc), 10_000e6);
-
-        uint256 fee = fc.collectManagementFee(notional, elapsed);
-        // 0.25% of $1M = $2500
-        assertApproxEqAbs(fee, 2500e6, 1e6, "management fee = 0.25% ann");
+        uint256 fee = collector.collectManagementFee(notional, elapsed);
+        assertEq(fee, expectedFee, "full year management fee = 0.25% of notional");
     }
 
-    // ================================================================
-    // Performance fee: 10% of carry net
-    // ================================================================
+    function test_collectManagementFee_halfYear() public {
+        uint256 notional = 1_000_000e6;
+        uint256 elapsed = 365 days / 2; // ~182.5 days
+        // fee = 1_000_000e6 * 25 * (365days/2) / (10000 * 365days)
+        // = 1_000_000e6 * 25 / 20000 = 1_250e6
+        uint256 expectedFee = 1_250e6;
+        _fundOwner(expectedFee);
 
-    function test_performanceFee_correct_amount() public {
-        uint256 carryNet = 10_000e6; // $10k carry this epoch
-
-        usdc.mint(caller, carryNet);
-        usdc.approve(address(fc), carryNet);
-
-        uint256 fee = fc.collectPerformanceFee(carryNet);
-        // 10% of 10000 = 1000 USDC
-        assertEq(fee, 1_000e6, "performance fee = 10% of carry");
-        assertEq(usdc.balanceOf(treasury), 1_000e6);
+        uint256 fee = collector.collectManagementFee(notional, elapsed);
+        assertEq(fee, expectedFee, "half year management fee = 0.125% of notional");
     }
 
-    // ================================================================
-    // Access control
-    // ================================================================
+    function test_collectManagementFee_48hEpoch() public {
+        uint256 notional = 1_000_000e6;
+        uint256 elapsed = 48 hours;
+        // fee = notional * 25 * 172800 / (10000 * 31536000)
+        uint256 expectedFee = (notional * 25 * 48 hours) / (10000 * 365 days);
+        _fundOwner(expectedFee);
 
-    function test_onlyOwner_embeddedFee() public {
-        vm.prank(address(0xdead));
+        uint256 fee = collector.collectManagementFee(notional, elapsed);
+        assertEq(fee, expectedFee, "48h epoch pro-rata fee");
+        assertGt(fee, 0, "fee should be positive for 48h epoch");
+    }
+
+    function test_collectManagementFee_transfersToTreasury() public {
+        uint256 notional = 1_000_000e6;
+        uint256 elapsed = 365 days;
+        uint256 expectedFee = 2_500e6;
+        _fundOwner(expectedFee);
+
+        uint256 treasuryBefore = usdc.balanceOf(treasury);
+        collector.collectManagementFee(notional, elapsed);
+        uint256 treasuryAfter = usdc.balanceOf(treasury);
+
+        assertEq(treasuryAfter - treasuryBefore, expectedFee);
+    }
+
+    function test_collectManagementFee_emitsEvent() public {
+        uint256 notional = 1_000_000e6;
+        uint256 elapsed = 365 days;
+        uint256 expectedFee = 2_500e6;
+        _fundOwner(expectedFee);
+
+        vm.expectEmit(false, false, false, true);
+        emit FeeCollector.ManagementFeeCollected(notional, elapsed, expectedFee);
+        collector.collectManagementFee(notional, elapsed);
+    }
+
+    function test_collectManagementFee_zeroElapsed() public {
+        uint256 fee = collector.collectManagementFee(1_000_000e6, 0);
+        assertEq(fee, 0, "zero elapsed = zero fee");
+    }
+
+    function test_collectManagementFee_zeroNotional() public {
+        uint256 fee = collector.collectManagementFee(0, 365 days);
+        assertEq(fee, 0);
+    }
+
+    // ---------------------------------------------------------------
+    // collectPerformanceFee: 10% of carry net
+    // ---------------------------------------------------------------
+    function test_collectPerformanceFee_correctAmount() public {
+        uint256 carryNet = 100_000e6; // $100K net carry
+        // 10% = 1000 bps -> 100_000 * 1000 / 10000 = 10_000
+        uint256 expectedFee = 10_000e6;
+        _fundOwner(expectedFee);
+
+        uint256 fee = collector.collectPerformanceFee(carryNet);
+        assertEq(fee, expectedFee, "performance fee should be 10% of carry");
+    }
+
+    function test_collectPerformanceFee_transfersToTreasury() public {
+        uint256 carryNet = 50_000e6;
+        uint256 expectedFee = 5_000e6;
+        _fundOwner(expectedFee);
+
+        uint256 treasuryBefore = usdc.balanceOf(treasury);
+        collector.collectPerformanceFee(carryNet);
+        uint256 treasuryAfter = usdc.balanceOf(treasury);
+
+        assertEq(treasuryAfter - treasuryBefore, expectedFee);
+    }
+
+    function test_collectPerformanceFee_emitsEvent() public {
+        uint256 carryNet = 100_000e6;
+        uint256 expectedFee = 10_000e6;
+        _fundOwner(expectedFee);
+
+        vm.expectEmit(false, false, false, true);
+        emit FeeCollector.PerformanceFeeCollected(carryNet, expectedFee);
+        collector.collectPerformanceFee(carryNet);
+    }
+
+    function test_collectPerformanceFee_zeroCarry() public {
+        uint256 fee = collector.collectPerformanceFee(0);
+        assertEq(fee, 0);
+    }
+
+    function test_collectPerformanceFee_smallCarry() public {
+        // 10 USDC carry -> 1 USDC fee
+        uint256 carryNet = 10e6;
+        uint256 expectedFee = 1e6;
+        _fundOwner(expectedFee);
+
+        uint256 fee = collector.collectPerformanceFee(carryNet);
+        assertEq(fee, expectedFee);
+    }
+
+    // ---------------------------------------------------------------
+    // Only owner can call
+    // ---------------------------------------------------------------
+    function test_collectEmbeddedFee_onlyOwner() public {
+        vm.prank(nonOwner);
         vm.expectRevert();
-        fc.collectEmbeddedFee(10_000e6);
+        collector.collectEmbeddedFee(1_000e6);
     }
 
-    function test_onlyOwner_originationFee() public {
-        vm.prank(address(0xdead));
+    function test_collectOriginationFee_onlyOwner() public {
+        vm.prank(nonOwner);
         vm.expectRevert();
-        fc.collectOriginationFee(10_000e6);
+        collector.collectOriginationFee(1_000e6);
     }
 
-    function test_onlyOwner_managementFee() public {
-        vm.prank(address(0xdead));
+    function test_collectManagementFee_onlyOwner() public {
+        vm.prank(nonOwner);
         vm.expectRevert();
-        fc.collectManagementFee(10_000e6, 48 hours);
+        collector.collectManagementFee(1_000e6, 48 hours);
     }
 
-    function test_onlyOwner_performanceFee() public {
-        vm.prank(address(0xdead));
+    function test_collectPerformanceFee_onlyOwner() public {
+        vm.prank(nonOwner);
         vm.expectRevert();
-        fc.collectPerformanceFee(10_000e6);
+        collector.collectPerformanceFee(1_000e6);
     }
 
-    // ================================================================
-    // Total collected tracking
-    // ================================================================
+    // ---------------------------------------------------------------
+    // Treasury receives funds (cumulative)
+    // ---------------------------------------------------------------
+    function test_treasuryReceivesCumulativeFees() public {
+        uint256 notional = 1_000_000e6;
+        // Embedded: 5_000e6, Origination: 1_000e6
+        uint256 totalNeeded = 6_000e6;
+        _fundOwner(totalNeeded);
 
-    function test_totalCollected_accumulates() public {
-        uint256 notional = 10_000e6;
-        usdc.mint(caller, notional);
-        usdc.approve(address(fc), notional);
+        collector.collectEmbeddedFee(notional);
+        collector.collectOriginationFee(notional);
 
-        fc.collectEmbeddedFee(notional);
-        fc.collectOriginationFee(notional);
-
-        // 50 + 10 = 60 USDC
-        assertEq(fc.totalCollected(), 60e6, "total collected = embedded + origination");
+        assertEq(usdc.balanceOf(treasury), 6_000e6, "treasury should receive both fees");
+        assertEq(collector.totalCollected(), 6_000e6, "total collected should be cumulative");
     }
 
-    // ================================================================
-    // Treasury getter
-    // ================================================================
+    function test_getTotalCollected() public {
+        assertEq(collector.getTotalCollected(), 0, "initially zero");
 
-    function test_treasury_returns_address() public view {
-        assertEq(fc.treasury(), treasury);
+        uint256 notional = 1_000_000e6;
+        _fundOwner(5_000e6);
+        collector.collectEmbeddedFee(notional);
+        assertEq(collector.getTotalCollected(), 5_000e6);
     }
 
-    // ================================================================
-    // Fuzz: fees always proportional to notional
-    // ================================================================
+    // ---------------------------------------------------------------
+    // setTreasury
+    // ---------------------------------------------------------------
+    function test_setTreasury() public {
+        address newTreasury = address(0xCAFE);
+        collector.setTreasury(newTreasury);
+        assertEq(collector.treasury(), newTreasury);
+    }
 
-    function testFuzz_embeddedFee_proportional(uint256 notional) public {
-        notional = bound(notional, 0, 100_000_000e6); // up to $100M
-        usdc.mint(caller, notional);
-        usdc.approve(address(fc), notional);
+    function test_setTreasury_emitsEvent() public {
+        address newTreasury = address(0xCAFE);
+        vm.expectEmit(false, false, false, true);
+        emit FeeCollector.TreasuryUpdated(newTreasury);
+        collector.setTreasury(newTreasury);
+    }
 
-        uint256 fee = fc.collectEmbeddedFee(notional);
-        uint256 expected = (notional * 50) / 10000;
-        assertEq(fee, expected, "embedded fee always 0.5%");
+    function test_setTreasury_revertsOnZero() public {
+        vm.expectRevert("zero treasury");
+        collector.setTreasury(address(0));
+    }
+
+    function test_setTreasury_onlyOwner() public {
+        vm.prank(nonOwner);
+        vm.expectRevert();
+        collector.setTreasury(address(0xCAFE));
+    }
+
+    function test_setTreasury_feesGoToNewTreasury() public {
+        address newTreasury = address(0xCAFE);
+        collector.setTreasury(newTreasury);
+
+        uint256 notional = 1_000_000e6;
+        _fundOwner(5_000e6);
+        collector.collectEmbeddedFee(notional);
+
+        assertEq(usdc.balanceOf(newTreasury), 5_000e6, "fee should go to new treasury");
+        assertEq(usdc.balanceOf(treasury), 0, "old treasury should have nothing");
+    }
+
+    // ---------------------------------------------------------------
+    // Constructor validations
+    // ---------------------------------------------------------------
+    function test_constructor_revertsZeroUsdc() public {
+        vm.expectRevert("zero usdc");
+        new FeeCollector(address(0), treasury, owner);
+    }
+
+    function test_constructor_revertsZeroTreasury() public {
+        vm.expectRevert("zero treasury");
+        new FeeCollector(address(usdc), address(0), owner);
+    }
+
+    // ---------------------------------------------------------------
+    // Constants
+    // ---------------------------------------------------------------
+    function test_constants() public view {
+        assertEq(collector.BPS(), 10000);
+        assertEq(collector.EMBEDDED_FEE_BPS(), 50);
+        assertEq(collector.ORIGINATION_FEE_BPS(), 10);
+        assertEq(collector.MANAGEMENT_FEE_BPS(), 25);
+        assertEq(collector.PERFORMANCE_FEE_BPS(), 1000);
+        assertEq(collector.SECONDS_PER_YEAR(), 365 days);
     }
 }

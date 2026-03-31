@@ -11,4 +11,8 @@ interface IReserveFund {
     function getLevel(uint256 totalNotional) external view returns (uint256 levelBps);
 
     function getHaircutRatio(uint256 totalNotional) external view returns (uint256 ratioBps);
+
+    function isBelowMinimum(uint256 totalNotional) external view returns (bool);
+
+    function isCritical(uint256 totalNotional) external view returns (bool);
 }

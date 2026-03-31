@@ -231,17 +231,25 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
         }
     }
 
+    /// @notice Adjust perp positions to match current spot values.
+    ///         Only adjusts positions where drift exceeds per-stock threshold.
     function _adjustPerps(bytes32 noteId, int256) internal {
         HedgePosition storage pos = positions[noteId];
 
         for (uint256 i = 0; i < pos.stockCount; i++) {
             StockHedge storage sh = pos.stocks[i];
-            nado.closeShort(sh.positionId);
-
             uint256 spotVal = tydro.getCollateralValue(sh.asset);
-            bytes32 newPosId = nado.openShort(sh.pairIndex, spotVal, DEFAULT_LEVERAGE);
-            sh.positionId = newPosId;
-            sh.perpNotional = spotVal;
+
+            // Only rebalance if per-stock drift is significant (>2%)
+            uint256 diff = spotVal > sh.perpNotional
+                ? spotVal - sh.perpNotional
+                : sh.perpNotional - spotVal;
+            if (diff * BPS / (sh.perpNotional > 0 ? sh.perpNotional : 1) > 200) {
+                nado.closeShort(sh.positionId);
+                bytes32 newPosId = nado.openShort(sh.pairIndex, spotVal, DEFAULT_LEVERAGE);
+                sh.positionId = newPosId;
+                sh.perpNotional = spotVal;
+            }
         }
     }
 

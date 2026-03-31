@@ -219,6 +219,7 @@ contract EndToEndTest is Test {
         vm.prank(keeper);
         engine.activateNote(noteId);
         assertEq(uint256(engine.getState(noteId)), uint256(State.Active));
+        vm.warp(block.timestamp + 31 days); // wait for first observation window
 
         // --- Step 5: Operator fulfills deposit in vault ---
         vm.prank(operator);
@@ -281,6 +282,7 @@ contract EndToEndTest is Test {
         engine.priceNote(noteId, initialPrices);
         vm.prank(keeper);
         engine.activateNote(noteId);
+        vm.warp(block.timestamp + 31 days); // wait for first observation window
 
         vm.prank(operator);
         vault.fulfillDeposit(requestId, noteId, basket);
@@ -349,6 +351,7 @@ contract EndToEndTest is Test {
         engine.priceNote(noteId, prices);
         vm.prank(keeper);
         engine.activateNote(noteId);
+        vm.warp(block.timestamp + 31 days); // wait for first observation window
 
         vm.prank(operator);
         vault.fulfillDeposit(requestId, noteId, basket);
@@ -440,6 +443,7 @@ contract EndToEndTest is Test {
         engine.priceNote(noteId, prices);
         vm.prank(keeper);
         engine.activateNote(noteId);
+        vm.warp(block.timestamp + 31 days);
 
         // Emergency pause
         engine.emergencyPause(noteId);
@@ -490,6 +494,7 @@ contract EndToEndTest is Test {
         engine.priceNote(noteId, prices);
         vm.prank(keeper);
         engine.activateNote(noteId);
+        vm.warp(block.timestamp + 31 days);
 
         usdc.mint(address(engine), depositAmount * 3);
 
@@ -560,6 +565,7 @@ contract EndToEndTest is Test {
         engine.priceNote(noteId, prices);
         vm.prank(keeper);
         engine.activateNote(noteId);
+        vm.warp(block.timestamp + 31 days); // wait for first observation window
 
         vm.prank(operator);
         vault.fulfillDeposit(requestId, noteId, basket);

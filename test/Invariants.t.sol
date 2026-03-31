@@ -99,7 +99,7 @@ contract InvariantTest is Test {
 
     function testFuzz_INV5_haircutMonotonic(uint256 balance1, uint256 balance2) public {
         uint256 notional = 1_000_000e6;
-        balance1 = bound(balance1, 0, notional / 10);
+        balance1 = bound(balance1, 1, notional / 10); // min 1 to avoid zero deposit revert
         balance2 = bound(balance2, balance1, notional / 10);
 
         // Fund reserve with balance1

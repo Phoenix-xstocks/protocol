@@ -236,6 +236,9 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         // Update issuance gate counters
         issuanceGate.noteActivated(note.notional);
 
+        // Set observation time so first observe must wait OBS_INTERVAL_DAYS
+        note.lastObservationTime = block.timestamp;
+
         _transition(noteId, State.Active);
     }
 

@@ -244,6 +244,9 @@ contract AutocallEngineTest is Test {
 
         vm.prank(keeper);
         engine.activateNote(noteId);
+
+        // Warp past first observation interval so observe() is callable
+        vm.warp(block.timestamp + 31 days);
     }
 
     // ================================================================

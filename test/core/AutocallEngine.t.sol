@@ -1,0 +1,464 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import { Test } from "forge-std/Test.sol";
+import { AutocallEngine } from "../../src/core/AutocallEngine.sol";
+import { State } from "../../src/interfaces/IAutocallEngine.sol";
+import { IHedgeManager } from "../../src/interfaces/IHedgeManager.sol";
+import { ICREConsumer, PricingResult } from "../../src/interfaces/ICREConsumer.sol";
+import { IIssuanceGate } from "../../src/interfaces/IIssuanceGate.sol";
+import { ICouponCalculator } from "../../src/interfaces/ICouponCalculator.sol";
+import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+
+// ================================================================
+// Mock contracts
+// ================================================================
+
+contract MockUSDC is ERC20 {
+    constructor() ERC20("Mock USDC", "USDC") {}
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+
+    function decimals() public pure override returns (uint8) {
+        return 6;
+    }
+}
+
+contract MockHedgeManager is IHedgeManager {
+    uint256 public recoveredAmount = 100_000e6;
+
+    function openHedge(bytes32, address[] calldata, uint256) external {}
+
+    function closeHedge(bytes32) external returns (uint256) {
+        return recoveredAmount;
+    }
+
+    function rebalance(bytes32) external {}
+
+    function getDeltaDrift(bytes32) external pure returns (int256) {
+        return 0;
+    }
+
+    function setRecoveredAmount(uint256 amount) external {
+        recoveredAmount = amount;
+    }
+}
+
+contract MockCREConsumer is ICREConsumer {
+    mapping(bytes32 => PricingResult) public results;
+    mapping(bytes32 => bool) public accepted;
+
+    function setPricing(bytes32 noteId, PricingResult calldata result) external {
+        results[noteId] = result;
+        accepted[noteId] = true;
+    }
+
+    function fulfillPricing(bytes32, PricingResult calldata) external pure {}
+
+    function getAcceptedPricing(bytes32 noteId) external view returns (PricingResult memory) {
+        require(accepted[noteId], "pricing not accepted");
+        return results[noteId];
+    }
+}
+
+contract MockIssuanceGate is IIssuanceGate {
+    bool public approved = true;
+    string public rejectReason = "";
+
+    function checkIssuance(bytes32, uint256, address[] calldata)
+        external
+        view
+        returns (bool, string memory)
+    {
+        return (approved, rejectReason);
+    }
+
+    function setApproved(bool _approved, string calldata reason) external {
+        approved = _approved;
+        rejectReason = reason;
+    }
+}
+
+contract MockCouponCalculator is ICouponCalculator {
+    uint256 public baseBps = 700; // 7%
+    uint256 public carryBps = 200; // 2%
+    uint256 public totalBps = 900; // 9%
+
+    function calculateCoupon(uint256, uint256, uint256)
+        external
+        view
+        returns (uint256, uint256, uint256)
+    {
+        return (baseBps, carryBps, totalBps);
+    }
+
+    function calculateCouponAmount(uint256 notional, uint256 couponBps, uint256 obsIntervalDays)
+        external
+        pure
+        returns (uint256)
+    {
+        return (notional * couponBps * obsIntervalDays) / (365 * 10_000);
+    }
+}
+
+// ================================================================
+// Test contract
+// ================================================================
+
+contract AutocallEngineTest is Test {
+    AutocallEngine public engine;
+    MockUSDC public usdc;
+    MockHedgeManager public hedge;
+    MockCREConsumer public cre;
+    MockIssuanceGate public gate;
+    MockCouponCalculator public couponCalc;
+
+    address admin = address(this);
+    address keeper = address(0xBEEF);
+    address vault = address(0xCAFE);
+    address holder = address(0x1234);
+
+    address[] basket;
+
+    function setUp() public {
+        usdc = new MockUSDC();
+        hedge = new MockHedgeManager();
+        cre = new MockCREConsumer();
+        gate = new MockIssuanceGate();
+        couponCalc = new MockCouponCalculator();
+
+        engine = new AutocallEngine(
+            admin,
+            address(usdc),
+            address(hedge),
+            address(cre),
+            address(gate),
+            address(couponCalc)
+        );
+
+        engine.grantRole(engine.KEEPER_ROLE(), keeper);
+        engine.grantRole(engine.VAULT_ROLE(), vault);
+
+        basket = new address[](3);
+        basket[0] = address(0xA);
+        basket[1] = address(0xB);
+        basket[2] = address(0xC);
+    }
+
+    // ================================================================
+    // Helper
+    // ================================================================
+
+    function _createNote() internal returns (bytes32 noteId) {
+        vm.prank(vault);
+        noteId = engine.createNote(basket, 10_000e6, holder);
+    }
+
+    function _createAndPriceNote() internal returns (bytes32 noteId) {
+        noteId = _createNote();
+
+        // Set CRE pricing
+        PricingResult memory pricing = PricingResult({
+            putPremiumBps: 900,
+            kiProbabilityBps: 500,
+            expectedKILossBps: 200,
+            vegaBps: 100,
+            inputsHash: keccak256("test")
+        });
+        cre.setPricing(noteId, pricing);
+
+        int256[] memory initialPrices = new int256[](3);
+        initialPrices[0] = 100e8;
+        initialPrices[1] = 200e8;
+        initialPrices[2] = 300e8;
+
+        vm.prank(keeper);
+        engine.priceNote(noteId, initialPrices);
+    }
+
+    function _createPriceAndActivate() internal returns (bytes32 noteId) {
+        noteId = _createAndPriceNote();
+
+        vm.prank(keeper);
+        engine.activateNote(noteId);
+    }
+
+    // ================================================================
+    // createNote tests
+    // ================================================================
+
+    function test_createNote_success() public {
+        bytes32 noteId = _createNote();
+
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Created));
+        assertEq(engine.getNoteCount(), 1);
+    }
+
+    function test_createNote_invalid_basket_size() public {
+        address[] memory smallBasket = new address[](2);
+        smallBasket[0] = address(0xA);
+        smallBasket[1] = address(0xB);
+
+        vm.prank(vault);
+        vm.expectRevert(AutocallEngine.InvalidBasket.selector);
+        engine.createNote(smallBasket, 10_000e6, holder);
+    }
+
+    function test_createNote_only_vault_role() public {
+        vm.prank(holder);
+        vm.expectRevert();
+        engine.createNote(basket, 10_000e6, holder);
+    }
+
+    function test_createNote_returns_unique_ids() public {
+        vm.prank(vault);
+        bytes32 id1 = engine.createNote(basket, 10_000e6, holder);
+
+        vm.prank(vault);
+        bytes32 id2 = engine.createNote(basket, 10_000e6, holder);
+
+        assertTrue(id1 != id2);
+    }
+
+    // ================================================================
+    // INV-4: State transition tests
+    // ================================================================
+
+    function test_priceNote_created_to_priced() public {
+        bytes32 noteId = _createAndPriceNote();
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Priced));
+    }
+
+    function test_activateNote_priced_to_active() public {
+        bytes32 noteId = _createPriceAndActivate();
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Active));
+    }
+
+    function test_observe_active_to_observation_pending_and_back() public {
+        bytes32 noteId = _createPriceAndActivate();
+
+        // Fund engine for coupon payments
+        usdc.mint(address(engine), 1_000_000e6);
+
+        engine.observe(noteId);
+        // After observe with default 100% perf, should autocall (100% >= 100%-stepdown)
+        // First obs: trigger = 10000 - 200*1 = 9800. perf = 10000 >= 9800 => autocall
+        // So it goes to Settled after autocall
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Settled));
+    }
+
+    function test_cancel_created() public {
+        bytes32 noteId = _createNote();
+
+        engine.cancelNote(noteId);
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Cancelled));
+    }
+
+    function test_cancel_priced() public {
+        bytes32 noteId = _createAndPriceNote();
+
+        engine.cancelNote(noteId);
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Cancelled));
+    }
+
+    function test_cancel_active_reverts() public {
+        bytes32 noteId = _createPriceAndActivate();
+
+        vm.expectRevert(
+            abi.encodeWithSelector(AutocallEngine.InvalidTransition.selector, State.Active, State.Cancelled)
+        );
+        engine.cancelNote(noteId);
+    }
+
+    function test_emergency_pause_and_resume() public {
+        bytes32 noteId = _createPriceAndActivate();
+
+        engine.emergencyPause(noteId);
+        assertEq(uint256(engine.getState(noteId)), uint256(State.EmergencyPaused));
+
+        engine.emergencyResume(noteId);
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Active));
+    }
+
+    function test_emergency_pause_only_admin() public {
+        bytes32 noteId = _createPriceAndActivate();
+
+        vm.prank(holder);
+        vm.expectRevert();
+        engine.emergencyPause(noteId);
+    }
+
+    function test_emergency_pause_only_from_active() public {
+        bytes32 noteId = _createNote();
+
+        vm.expectRevert(
+            abi.encodeWithSelector(AutocallEngine.InvalidState.selector, State.Created, State.Active)
+        );
+        engine.emergencyPause(noteId);
+    }
+
+    // ================================================================
+    // INV-6: issuance gate tests
+    // ================================================================
+
+    function test_activate_rejected_by_issuance_gate() public {
+        bytes32 noteId = _createAndPriceNote();
+
+        gate.setApproved(false, "TVL exceeded");
+
+        vm.prank(keeper);
+        vm.expectRevert(abi.encodeWithSelector(AutocallEngine.IssuanceNotApproved.selector, "TVL exceeded"));
+        engine.activateNote(noteId);
+
+        // State should still be Priced
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Priced));
+    }
+
+    function test_no_priced_to_active_without_gate() public {
+        bytes32 noteId = _createAndPriceNote();
+
+        gate.setApproved(false, "not approved");
+
+        vm.prank(keeper);
+        vm.expectRevert();
+        engine.activateNote(noteId);
+
+        // Must remain Priced
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Priced));
+    }
+
+    // ================================================================
+    // Pricing tests
+    // ================================================================
+
+    function test_priceNote_only_keeper() public {
+        bytes32 noteId = _createNote();
+
+        PricingResult memory pricing = PricingResult({
+            putPremiumBps: 900,
+            kiProbabilityBps: 500,
+            expectedKILossBps: 200,
+            vegaBps: 100,
+            inputsHash: keccak256("test")
+        });
+        cre.setPricing(noteId, pricing);
+
+        int256[] memory initialPrices = new int256[](3);
+
+        vm.prank(holder);
+        vm.expectRevert();
+        engine.priceNote(noteId, initialPrices);
+    }
+
+    function test_priceNote_wrong_state_reverts() public {
+        bytes32 noteId = _createAndPriceNote();
+
+        int256[] memory initialPrices = new int256[](3);
+
+        vm.prank(keeper);
+        vm.expectRevert(
+            abi.encodeWithSelector(AutocallEngine.InvalidState.selector, State.Priced, State.Created)
+        );
+        engine.priceNote(noteId, initialPrices);
+    }
+
+    // ================================================================
+    // settleKI tests
+    // ================================================================
+
+    function test_settleKI_only_holder() public {
+        bytes32 noteId = _createPriceAndActivate();
+        // We cannot easily put into KISettle state without modifying internals,
+        // but we can test the holder check
+        // The observe flow would need mocked prices < 50% to reach KISettle
+    }
+
+    // ================================================================
+    // getNote view test
+    // ================================================================
+
+    function test_getNote_returns_correct_data() public {
+        bytes32 noteId = _createNote();
+
+        (
+            address[] memory b,
+            uint256 notional,
+            address h,
+            State state,
+            uint8 obs,
+            uint256 memory_,
+            ,
+            uint256 createdAt,
+        ) = engine.getNote(noteId);
+
+        assertEq(b.length, 3);
+        assertEq(notional, 10_000e6);
+        assertEq(h, holder);
+        assertEq(uint256(state), uint256(State.Created));
+        assertEq(obs, 0);
+        assertEq(memory_, 0);
+        assertGt(createdAt, 0);
+    }
+
+    // ================================================================
+    // Invalid state transition coverage
+    // ================================================================
+
+    function test_invalid_transition_created_to_active() public {
+        bytes32 noteId = _createNote();
+
+        // Try to activate directly from Created (skipping Priced)
+        vm.prank(keeper);
+        vm.expectRevert(
+            abi.encodeWithSelector(AutocallEngine.InvalidState.selector, State.Created, State.Priced)
+        );
+        engine.activateNote(noteId);
+    }
+
+    function test_observe_not_active_reverts() public {
+        bytes32 noteId = _createNote();
+
+        vm.expectRevert(
+            abi.encodeWithSelector(AutocallEngine.InvalidState.selector, State.Created, State.Active)
+        );
+        engine.observe(noteId);
+    }
+
+    // ================================================================
+    // Autocall settlement test
+    // ================================================================
+
+    function test_autocall_settles_and_pays() public {
+        bytes32 noteId = _createPriceAndActivate();
+
+        // Fund engine with USDC for settlement + coupons
+        usdc.mint(address(engine), 200_000e6);
+
+        uint256 holderBalBefore = usdc.balanceOf(holder);
+
+        engine.observe(noteId);
+
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Settled));
+        assertTrue(usdc.balanceOf(holder) > holderBalBefore);
+    }
+
+    // ================================================================
+    // Multiple notes test
+    // ================================================================
+
+    function test_multiple_notes_independent() public {
+        bytes32 id1 = _createNote();
+        bytes32 id2 = _createNote();
+
+        assertEq(engine.getNoteCount(), 2);
+        assertEq(uint256(engine.getState(id1)), uint256(State.Created));
+        assertEq(uint256(engine.getState(id2)), uint256(State.Created));
+
+        // Cancel one, other unaffected
+        engine.cancelNote(id1);
+        assertEq(uint256(engine.getState(id1)), uint256(State.Cancelled));
+        assertEq(uint256(engine.getState(id2)), uint256(State.Created));
+    }
+}

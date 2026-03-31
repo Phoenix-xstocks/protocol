@@ -81,7 +81,14 @@ function choleskyDecompose(corr: number[][]): number[][] {
   return L;
 }
 
-function buildCorrMatrix(correlations: number[]): number[][] {
+function buildCorrMatrix(correlations: number[], n: number): number[][] {
+  if (n === 2) {
+    return [
+      [1.0, correlations[0]],
+      [correlations[0], 1.0],
+    ];
+  }
+  // 3 assets: correlations = [rho12, rho13, rho23]
   return [
     [1.0, correlations[0], correlations[1]],
     [correlations[0], 1.0, correlations[2]],
@@ -99,7 +106,7 @@ function runMonteCarloCore(
   const n = implVols.length;
   const dt = maturityDays / 365 / numObservations;
   const riskFreeRate = 0.045;
-  let totalPremium = 0;
+  let totalProtocolLoss = 0; // Expected loss from KI events (what the protocol insures against)
   let kiCount = 0;
   let totalKILoss = 0;
   let totalAutocallMonth = 0;
@@ -108,7 +115,6 @@ function runMonteCarloCore(
   for (let path = 0; path < numPaths; path++) {
     const prices = new Array(n).fill(1.0);
     let autocalled = false;
-    let couponsEarned = 0;
     let autocallMonth = 0;
 
     for (let obs = 0; obs < numObservations; obs++) {
@@ -128,34 +134,32 @@ function runMonteCarloCore(
       if (worstPerf >= trigger) {
         autocalled = true;
         autocallMonth = obs + 1;
-        couponsEarned += 1;
         break;
       }
-      if (worstPerf >= couponBarrier) couponsEarned += 1;
     }
 
     if (autocalled) {
-      totalPremium += couponsEarned / numObservations;
+      // Autocall: protocol pays back notional (no loss)
       totalAutocallMonth += autocallMonth;
       autocallCount++;
     } else {
       const worstFinal = Math.min(...prices);
       if (worstFinal < kiBarrier) {
+        // KI: protocol loses (1 - worstFinal) of notional
         const loss = 1.0 - worstFinal;
         totalKILoss += loss;
         kiCount++;
-        totalPremium += loss;
-      } else {
-        totalPremium += couponsEarned / numObservations;
+        totalProtocolLoss += loss;
       }
+      // No KI: protocol pays back notional (no loss)
     }
   }
 
-  return { premium: totalPremium, kiCount, kiLoss: totalKILoss, autocallMonth: totalAutocallMonth, autocallCount };
+  return { premium: totalProtocolLoss, kiCount, kiLoss: totalKILoss, autocallMonth: totalAutocallMonth, autocallCount };
 }
 
 function runMonteCarlo(inputs: MCInputs): MCOutput {
-  const corrMatrix = buildCorrMatrix(inputs.correlations);
+  const corrMatrix = buildCorrMatrix(inputs.correlations, inputs.implVols.length);
   const L = choleskyDecompose(corrMatrix);
   const rng = new DeterministicRNG(inputs.rngSeed);
 
@@ -186,9 +190,9 @@ function runMonteCarlo(inputs: MCInputs): MCOutput {
 
 function main() {
   const inputs: MCInputs = {
-    spotPrices: [1.0, 1.0, 1.0],
-    implVols: [0.55, 0.6, 0.4],
-    correlations: [0.55, 0.48, 0.52],
+    spotPrices: [1.0, 1.0],
+    implVols: [0.30, 0.25],          // wQQQx ~30%, wSPYx ~25% implied vol
+    correlations: [0.80],             // QQQ/SPY correlation ~0.80
     kiBarrier: 0.5,
     couponBarrier: 0.7,
     autocallTrigger: 1.0,
@@ -201,7 +205,7 @@ function main() {
 
   console.log("Phoenix Autocall MC Pricer");
   console.log("=========================");
-  console.log(`Assets: 3 (NVDA, TSLA, META)`);
+  console.log(`Assets: ${inputs.implVols.length} (wQQQx, wSPYx)`);
   console.log(`Vols: ${inputs.implVols.map((v) => (v * 100).toFixed(0) + "%").join(", ")}`);
   console.log(`Correlations: ${inputs.correlations.map((c) => c.toFixed(2)).join(", ")}`);
   console.log(`KI: ${(inputs.kiBarrier * 100).toFixed(0)}%, Autocall: ${(inputs.autocallTrigger * 100).toFixed(0)}%`);

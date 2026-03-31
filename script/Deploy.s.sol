@@ -126,8 +126,9 @@ contract Deploy is Script {
         console.log("XYieldVault:", address(vault));
 
         // ---- 6. Grant roles ----
-        // AutocallEngine: vault can create notes, deployer is keeper
+        // AutocallEngine: vault + operator can create notes, deployer is keeper
         engine.grantRole(engine.VAULT_ROLE(), address(vault));
+        engine.grantRole(engine.VAULT_ROLE(), deployer); // deployer acts as operator
         engine.grantRole(engine.KEEPER_ROLE(), deployer);
 
         // NoteToken: engine and vault can mint/burn
@@ -135,8 +136,23 @@ contract Deploy is Script {
         noteToken.grantRole(noteToken.MINTER_ROLE(), address(vault));
         noteToken.grantRole(noteToken.BURNER_ROLE(), address(engine));
 
+        // XYieldVault: deployer is operator
+        vault.grantRole(vault.OPERATOR_ROLE(), deployer);
+
+        // VolOracle: deployer can update vols
+        volOracle.grantRole(volOracle.UPDATER_ROLE(), deployer);
+
+        // IssuanceGate: engine needs to call noteActivated/noteSettled
+        issuanceGate.transferOwnership(address(engine));
+
+        // HedgeManager: engine is owner for openHedge/closeHedge calls
+        hedgeManager.transferOwnership(address(engine));
+
         // Transfer reserve ownership to epoch manager
         reserveFund.transferOwnership(address(epochManager));
+
+        // Set fee collector on vault
+        vault.setFeeCollector(address(feeCollector));
 
         vm.stopBroadcast();
 

@@ -166,6 +166,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         require(notional > 0, "zero notional");
 
         noteId = keccak256(abi.encodePacked(basket, notional, holder, block.timestamp, noteCount));
+        require(_notes[noteId].createdAt == 0, "duplicate noteId");
 
         Note storage note = _notes[noteId];
         note.basket = basket;

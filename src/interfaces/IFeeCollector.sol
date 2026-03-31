@@ -11,4 +11,6 @@ interface IFeeCollector {
     function collectPerformanceFee(uint256 carryNet) external returns (uint256 fee);
 
     function getTotalCollected() external view returns (uint256);
+
+    function treasury() external view returns (address);
 }

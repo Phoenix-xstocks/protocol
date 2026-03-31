@@ -7,6 +7,7 @@ import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/Saf
 
 import { IXYieldVault } from "../interfaces/IXYieldVault.sol";
 import { IAutocallEngine } from "../interfaces/IAutocallEngine.sol";
+import { IFeeCollector } from "../interfaces/IFeeCollector.sol";
 import { NoteToken } from "./NoteToken.sol";
 
 /// @title XYieldVault
@@ -58,6 +59,7 @@ contract XYieldVault is IXYieldVault, AccessControl, ReentrancyGuard {
     IERC20 public immutable usdc;
     IAutocallEngine public immutable engine;
     NoteToken public immutable noteToken;
+    IFeeCollector public feeCollector;
 
     mapping(uint256 => DepositRequest) public requests;
     uint256 public nextRequestId;
@@ -93,6 +95,11 @@ contract XYieldVault is IXYieldVault, AccessControl, ReentrancyGuard {
         usdc = IERC20(_usdc);
         engine = IAutocallEngine(_engine);
         noteToken = NoteToken(_noteToken);
+    }
+
+    /// @notice Set the fee collector. Admin only.
+    function setFeeCollector(address _feeCollector) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        feeCollector = IFeeCollector(_feeCollector);
     }
 
     // ----------------------------------------------------------------
@@ -153,8 +160,23 @@ contract XYieldVault is IXYieldVault, AccessControl, ReentrancyGuard {
         req.status = RequestStatus.Claimed;
         noteTokenId = uint256(req.noteId);
 
-        // Mint NoteToken
+        // Collect deposit fees (embedded 0.5% + origination 0.1%) per spec section 13/17
+        uint256 netAmount = req.amount;
+        if (address(feeCollector) != address(0)) {
+            uint256 embeddedFee = (req.amount * 50) / 10000; // 0.5%
+            uint256 originationFee = (req.amount * 10) / 10000; // 0.1%
+            uint256 totalFees = embeddedFee + originationFee;
+            if (totalFees > 0) {
+                usdc.safeTransfer(feeCollector.treasury(), totalFees);
+                netAmount -= totalFees;
+            }
+        }
+
+        // Mint NoteToken (for full amount — fees are protocol revenue, not holder cost reduction)
         noteToken.mint(req.receiver, req.noteId, req.amount);
+
+        // Transfer net USDC to engine for coupon payments and settlement
+        usdc.safeTransfer(address(engine), netAmount);
 
         _totalAssets += req.amount;
         activeNoteCount++;

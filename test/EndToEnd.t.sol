@@ -12,6 +12,7 @@ import { IIssuanceGate } from "../src/interfaces/IIssuanceGate.sol";
 import { ICouponCalculator } from "../src/interfaces/ICouponCalculator.sol";
 import { IVolOracle } from "../src/interfaces/IVolOracle.sol";
 import { ICarryEngine } from "../src/interfaces/ICarryEngine.sol";
+import { FeeCollector } from "../src/periphery/FeeCollector.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 // ================================================================
@@ -522,5 +523,62 @@ contract EndToEndTest is Test {
         // User gets: current coupon + 3 missed memory coupons + notional
         uint256 received = usdc.balanceOf(user) - balBefore;
         assertGt(received, depositAmount, "notional + coupons + memory");
+    }
+
+    // ================================================================
+    // Fee collection on deposit
+    // ================================================================
+
+    function test_e2e_fees_collected_on_deposit() public {
+        // Deploy a real FeeCollector
+        address treasury = address(0xDEAD);
+
+        // Import FeeCollector
+        FeeCollector fc = new FeeCollector(address(usdc), treasury, admin);
+
+        // Set fee collector on vault
+        vault.setFeeCollector(address(fc));
+
+        uint256 depositAmount = 10_000e6;
+
+        vm.startPrank(user);
+        usdc.approve(address(vault), depositAmount);
+        uint256 requestId = vault.requestDeposit(depositAmount, user);
+        vm.stopPrank();
+
+        engine.grantRole(engine.VAULT_ROLE(), operator);
+
+        vm.prank(operator);
+        bytes32 noteId = engine.createNote(basket, depositAmount, user);
+
+        PricingResult memory pricing = PricingResult({
+            putPremiumBps: 900, kiProbabilityBps: 500,
+            expectedKILossBps: 200, vegaBps: 100, inputsHash: keccak256("test")
+        });
+        cre.setPricing(noteId, pricing);
+
+        int256[] memory prices = new int256[](3);
+        prices[0] = 100e8; prices[1] = 200e8; prices[2] = 300e8;
+
+        vm.prank(keeper);
+        engine.priceNote(noteId, prices);
+        vm.prank(keeper);
+        engine.activateNote(noteId);
+
+        vm.prank(operator);
+        vault.fulfillDeposit(requestId, noteId, basket);
+
+        vm.prank(user);
+        vault.claimDeposit(requestId);
+
+        // Embedded fee = 0.5% of 10000 = 50
+        // Origination fee = 0.1% of 10000 = 10
+        // Total fees = 60
+        uint256 expectedFees = 60e6;
+        assertEq(usdc.balanceOf(treasury), expectedFees, "treasury received fees");
+
+        // Engine received net amount
+        uint256 engineBal = usdc.balanceOf(address(engine));
+        assertEq(engineBal, depositAmount - expectedFees, "engine received net amount");
     }
 }

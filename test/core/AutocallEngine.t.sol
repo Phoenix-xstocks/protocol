@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import { Test } from "forge-std/Test.sol";
-import { AutocallEngine } from "../../src/core/AutocallEngine.sol";
+import { AutocallEngine, IPriceFeed } from "../../src/core/AutocallEngine.sol";
 import { State } from "../../src/interfaces/IAutocallEngine.sol";
 import { IHedgeManager } from "../../src/interfaces/IHedgeManager.sol";
 import { ICREConsumer, PricingResult } from "../../src/interfaces/ICREConsumer.sol";
@@ -103,6 +103,18 @@ contract MockCouponCalculator is ICouponCalculator {
     }
 }
 
+contract MockPriceFeed is IPriceFeed {
+    mapping(bytes32 => int192) public prices;
+
+    function setPrice(bytes32 feedId, int192 price) external {
+        prices[feedId] = price;
+    }
+
+    function getLatestPrice(bytes32 feedId) external view returns (int192 price, uint32 timestamp) {
+        return (prices[feedId], uint32(block.timestamp));
+    }
+}
+
 // ================================================================
 // Test contract
 // ================================================================
@@ -114,6 +126,7 @@ contract AutocallEngineTest is Test {
     MockCREConsumer public cre;
     MockIssuanceGate public gate;
     MockCouponCalculator public couponCalc;
+    MockPriceFeed public priceFeed;
 
     address admin = address(this);
     address keeper = address(0xBEEF);
@@ -122,12 +135,18 @@ contract AutocallEngineTest is Test {
 
     address[] basket;
 
+    // Feed IDs for basket tokens
+    bytes32 constant FEED_A = keccak256("FEED_A");
+    bytes32 constant FEED_B = keccak256("FEED_B");
+    bytes32 constant FEED_C = keccak256("FEED_C");
+
     function setUp() public {
         usdc = new MockUSDC();
         hedge = new MockHedgeManager();
         cre = new MockCREConsumer();
         gate = new MockIssuanceGate();
         couponCalc = new MockCouponCalculator();
+        priceFeed = new MockPriceFeed();
 
         engine = new AutocallEngine(
             admin,
@@ -135,7 +154,8 @@ contract AutocallEngineTest is Test {
             address(hedge),
             address(cre),
             address(gate),
-            address(couponCalc)
+            address(couponCalc),
+            address(priceFeed)
         );
 
         engine.grantRole(engine.KEEPER_ROLE(), keeper);
@@ -145,6 +165,16 @@ contract AutocallEngineTest is Test {
         basket[0] = address(0xA);
         basket[1] = address(0xB);
         basket[2] = address(0xC);
+
+        // Configure feed IDs for basket tokens
+        engine.setFeedId(address(0xA), FEED_A);
+        engine.setFeedId(address(0xB), FEED_B);
+        engine.setFeedId(address(0xC), FEED_C);
+
+        // Set default prices (100% of initial = 100e8 each)
+        priceFeed.setPrice(FEED_A, 100e8);
+        priceFeed.setPrice(FEED_B, 200e8);
+        priceFeed.setPrice(FEED_C, 300e8);
     }
 
     // ================================================================
@@ -460,5 +490,185 @@ contract AutocallEngineTest is Test {
         engine.cancelNote(id1);
         assertEq(uint256(engine.getState(id1)), uint256(State.Cancelled));
         assertEq(uint256(engine.getState(id2)), uint256(State.Created));
+    }
+
+    // ================================================================
+    // Price feed integration tests
+    // ================================================================
+
+    /// @notice Coupon missed when worst-of drops below 70%
+    function test_observe_coupon_missed_below_barrier() public {
+        bytes32 noteId = _createPriceAndActivate();
+        usdc.mint(address(engine), 1_000_000e6);
+
+        // Drop token B to 60% of initial (200e8 -> 120e8)
+        priceFeed.setPrice(FEED_B, 120e8);
+        // worst perf = 120/200 * 10000 = 6000 bps (60%) < 70% coupon barrier
+
+        // Also set prices low enough to avoid autocall trigger
+        // trigger after 1 obs = 10000 - 200 = 9800 bps. worst = 6000 < 9800 → no autocall
+        engine.observe(noteId);
+
+        // Should return to Active (not autocalled, not last obs)
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Active));
+
+        // Check memory coupon accumulated
+        (,,,,, uint256 memoryCoupon,,,) = engine.getNote(noteId);
+        assertGt(memoryCoupon, 0, "memory coupon should accumulate on missed coupon");
+    }
+
+    /// @notice Coupon paid when worst-of >= 70% but < autocall trigger
+    function test_observe_coupon_paid_above_barrier() public {
+        bytes32 noteId = _createPriceAndActivate();
+        usdc.mint(address(engine), 1_000_000e6);
+
+        // Set token B to 80% of initial (200e8 -> 160e8)
+        priceFeed.setPrice(FEED_B, 160e8);
+        // worst perf = 160/200 * 10000 = 8000 bps (80%) >= 70% barrier
+        // trigger after 1 obs = 9800 bps. 8000 < 9800 → no autocall
+
+        uint256 holderBefore = usdc.balanceOf(holder);
+        engine.observe(noteId);
+
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Active));
+        assertGt(usdc.balanceOf(holder), holderBefore, "coupon should be paid");
+    }
+
+    /// @notice KI settlement when worst-of < 50% at maturity
+    function test_observe_ki_at_maturity() public {
+        bytes32 noteId = _createPriceAndActivate();
+        usdc.mint(address(engine), 1_000_000e6);
+
+        // Drop token C to 40% of initial (300e8 -> 120e8)
+        priceFeed.setPrice(FEED_C, 120e8);
+        // worst perf = 120/300 * 10000 = 4000 bps (40%) < 50% KI barrier
+
+        // Run through all 6 observations
+        for (uint256 i = 0; i < 6; i++) {
+            engine.observe(noteId);
+            // After last observation (i==5), should go to KISettle
+            if (i < 5) {
+                assertEq(uint256(engine.getState(noteId)), uint256(State.Active));
+            }
+        }
+
+        assertEq(uint256(engine.getState(noteId)), uint256(State.KISettle));
+    }
+
+    /// @notice No KI at maturity when worst-of >= 50%
+    function test_observe_no_ki_at_maturity() public {
+        bytes32 noteId = _createPriceAndActivate();
+        usdc.mint(address(engine), 1_000_000e6);
+
+        // Set token B to 55% of initial (200e8 -> 110e8)
+        priceFeed.setPrice(FEED_B, 110e8);
+        // worst perf = 110/200 * 10000 = 5500 bps (55%) >= 50% KI, < 70% coupon
+
+        // Run through all 6 observations
+        for (uint256 i = 0; i < 6; i++) {
+            engine.observe(noteId);
+        }
+
+        // Should settle at par (NoKISettle -> Settled)
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Settled));
+    }
+
+    /// @notice KI settlement with physical delivery (holder gets xStocks value)
+    function test_settleKI_physical() public {
+        bytes32 noteId = _createPriceAndActivate();
+        usdc.mint(address(engine), 1_000_000e6);
+
+        // Drop below KI
+        priceFeed.setPrice(FEED_C, 120e8); // 40% of 300e8
+
+        for (uint256 i = 0; i < 6; i++) {
+            engine.observe(noteId);
+        }
+        assertEq(uint256(engine.getState(noteId)), uint256(State.KISettle));
+
+        uint256 holderBefore = usdc.balanceOf(holder);
+        vm.prank(holder);
+        engine.settleKI(noteId, true);
+
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Settled));
+        assertGt(usdc.balanceOf(holder), holderBefore, "holder should receive payout");
+    }
+
+    /// @notice KI settlement with cash delivery
+    function test_settleKI_cash() public {
+        bytes32 noteId = _createPriceAndActivate();
+        usdc.mint(address(engine), 1_000_000e6);
+
+        // Drop below KI
+        priceFeed.setPrice(FEED_C, 120e8); // 40% of 300e8
+
+        for (uint256 i = 0; i < 6; i++) {
+            engine.observe(noteId);
+        }
+        assertEq(uint256(engine.getState(noteId)), uint256(State.KISettle));
+
+        uint256 holderBefore = usdc.balanceOf(holder);
+        vm.prank(holder);
+        engine.settleKI(noteId, false);
+
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Settled));
+        // Cash settlement at worst-of performance (40%)
+        uint256 payout = usdc.balanceOf(holder) - holderBefore;
+        assertEq(payout, 4_000e6, "cash payout should be 40% of 10000e6 notional");
+    }
+
+    /// @notice Memory coupon is paid out on autocall
+    function test_memory_coupon_paid_on_autocall() public {
+        bytes32 noteId = _createPriceAndActivate();
+        usdc.mint(address(engine), 1_000_000e6);
+
+        // Obs 1: miss coupon (worst < 70%)
+        priceFeed.setPrice(FEED_B, 120e8); // 60%
+        engine.observe(noteId);
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Active));
+
+        (,,,,, uint256 mem1,,,) = engine.getNote(noteId);
+        assertGt(mem1, 0, "memory should accumulate");
+
+        // Obs 2: autocall (prices recover to 100%)
+        priceFeed.setPrice(FEED_B, 200e8);
+        // trigger after 2 obs = 10000 - 400 = 9600 bps. perf = 10000 >= 9600 → autocall
+
+        uint256 holderBefore = usdc.balanceOf(holder);
+        engine.observe(noteId);
+
+        assertEq(uint256(engine.getState(noteId)), uint256(State.Settled));
+        // Holder should receive: notional + coupon + memory coupon
+        uint256 totalPaid = usdc.balanceOf(holder) - holderBefore;
+        assertGt(totalPaid, 10_000e6, "should receive notional + coupons including memory");
+    }
+
+    /// @notice Admin can set and update feed IDs
+    function test_setFeedId() public {
+        bytes32 newFeed = keccak256("NEW_FEED");
+        engine.setFeedId(address(0xD), newFeed);
+        assertEq(engine.feedIds(address(0xD)), newFeed);
+    }
+
+    /// @notice Batch set feed IDs
+    function test_setFeedIds_batch() public {
+        address[] memory xStocks = new address[](2);
+        xStocks[0] = address(0xD);
+        xStocks[1] = address(0xE);
+
+        bytes32[] memory feeds = new bytes32[](2);
+        feeds[0] = keccak256("FEED_D");
+        feeds[1] = keccak256("FEED_E");
+
+        engine.setFeedIds(xStocks, feeds);
+        assertEq(engine.feedIds(address(0xD)), feeds[0]);
+        assertEq(engine.feedIds(address(0xE)), feeds[1]);
+    }
+
+    /// @notice Non-admin cannot set feed IDs
+    function test_setFeedId_onlyAdmin() public {
+        vm.prank(holder);
+        vm.expectRevert();
+        engine.setFeedId(address(0xD), keccak256("FEED"));
     }
 }

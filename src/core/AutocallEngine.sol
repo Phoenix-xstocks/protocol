@@ -11,6 +11,11 @@ import { ICREConsumer, PricingResult } from "../interfaces/ICREConsumer.sol";
 import { IIssuanceGate } from "../interfaces/IIssuanceGate.sol";
 import { ICouponCalculator } from "../interfaces/ICouponCalculator.sol";
 
+/// @notice Minimal interface for reading latest verified prices.
+interface IPriceFeed {
+    function getLatestPrice(bytes32 feedId) external view returns (int192 price, uint32 timestamp);
+}
+
 /// @title AutocallEngine
 /// @notice State machine with 12 states for Phoenix Autocall worst-of notes.
 ///         Handles create, observe (autocall/coupon/KI), and settle flows.
@@ -64,6 +69,10 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     ICREConsumer public immutable creConsumer;
     IIssuanceGate public immutable issuanceGate;
     ICouponCalculator public immutable couponCalculator;
+    IPriceFeed public immutable priceFeed;
+
+    /// @notice Maps xStock token address -> Chainlink Data Streams feed ID
+    mapping(address => bytes32) public feedIds;
 
     // ----------------------------------------------------------------
     // Events
@@ -97,7 +106,8 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         address _hedgeManager,
         address _creConsumer,
         address _issuanceGate,
-        address _couponCalculator
+        address _couponCalculator,
+        address _priceFeed
     ) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         usdc = IERC20(_usdc);
@@ -105,6 +115,23 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         creConsumer = ICREConsumer(_creConsumer);
         issuanceGate = IIssuanceGate(_issuanceGate);
         couponCalculator = ICouponCalculator(_couponCalculator);
+        priceFeed = IPriceFeed(_priceFeed);
+    }
+
+    /// @notice Set the Chainlink feed ID for an xStock token. Admin only.
+    function setFeedId(address xStock, bytes32 feedId) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        feedIds[xStock] = feedId;
+    }
+
+    /// @notice Batch-set feed IDs for multiple xStocks.
+    function setFeedIds(address[] calldata xStocks, bytes32[] calldata _feedIds)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        require(xStocks.length == _feedIds.length, "length mismatch");
+        for (uint256 i = 0; i < xStocks.length; i++) {
+            feedIds[xStocks[i]] = _feedIds[i];
+        }
     }
 
     // ----------------------------------------------------------------
@@ -372,18 +399,22 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     // Internal: observation helpers
     // ----------------------------------------------------------------
 
+    /// @notice Calculate the worst-of performance across the basket.
+    ///         perf_i = currentPrice_i / initialPrice_i * BPS
+    ///         Returns min(perf_i) in basis points.
     function _getWorstPerformance(Note storage note) internal view returns (uint256) {
         uint256 worst = type(uint256).max;
         for (uint256 i = 0; i < note.basket.length; i++) {
-            // In production: use Chainlink price feeds
-            // For now, compute perf from initialPrices stored at creation
+            require(note.initialPrices.length > i && note.initialPrices[i] > 0, "missing initial price");
+
+            bytes32 feedId = feedIds[note.basket[i]];
+            require(feedId != bytes32(0), "feed not configured");
+
+            (int192 currentPrice,) = priceFeed.getLatestPrice(feedId);
+            require(currentPrice > 0, "invalid current price");
+
             // perf = currentPrice / initialPrice * BPS
-            // Mock: assume 100% perf (tests will override via mock)
-            uint256 perf = BPS; // placeholder -- mocked in tests
-            if (note.initialPrices.length > i && note.initialPrices[i] > 0) {
-                // Use initial prices for ratio calculation when available
-                perf = BPS; // simplified -- real impl uses price feeds
-            }
+            uint256 perf = (uint256(int256(currentPrice)) * BPS) / uint256(note.initialPrices[i]);
             if (perf < worst) {
                 worst = perf;
             }

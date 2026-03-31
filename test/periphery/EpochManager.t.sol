@@ -141,11 +141,12 @@ contract EpochManagerTest is Test {
     }
 
     function test_advanceEpoch_multiple() public {
-        vm.warp(block.timestamp + 48 hours);
+        uint256 start = block.timestamp;
+        vm.warp(start + 48 hours);
         epoch.advanceEpoch();
         assertEq(epoch.getCurrentEpoch(), 1);
 
-        vm.warp(block.timestamp + 48 hours);
+        vm.warp(start + 96 hours);
         epoch.advanceEpoch();
         assertEq(epoch.getCurrentEpoch(), 2);
     }

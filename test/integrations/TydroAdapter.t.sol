@@ -36,9 +36,18 @@ contract MockERC20 {
     }
 }
 
+contract MockAToken {
+    mapping(address => uint256) public balanceOf;
+
+    function setBalance(address account, uint256 amount) external {
+        balanceOf[account] = amount;
+    }
+}
+
 contract MockTydroPool {
     uint256 public totalCollateral;
     uint128 public liquidityRate;
+    mapping(address => address) public aTokens;
 
     function setCollateral(uint256 amount) external {
         totalCollateral = amount;
@@ -46,6 +55,10 @@ contract MockTydroPool {
 
     function setLiquidityRate(uint128 rate) external {
         liquidityRate = rate;
+    }
+
+    function setAToken(address asset, address aToken) external {
+        aTokens[asset] = aToken;
     }
 
     function supply(address, uint256 amount, address, uint16) external {
@@ -79,6 +92,18 @@ contract MockTydroPool {
     function getCurrentLiquidityRate(address) external view returns (uint128) {
         return liquidityRate;
     }
+
+    function getReserveData(address asset)
+        external
+        view
+        returns (
+            uint256, uint128, uint128, uint128, uint128, uint128,
+            uint40, uint16, address, address, address, address,
+            uint128, uint128, uint128
+        )
+    {
+        return (0, 0, 0, 0, 0, 0, 0, 0, aTokens[asset], address(0), address(0), address(0), 0, 0, 0);
+    }
 }
 
 contract TydroAdapterTest is Test {
@@ -86,13 +111,18 @@ contract TydroAdapterTest is Test {
     MockTydroPool public mockPool;
     MockERC20 public usdc;
     MockERC20 public xStock;
+    MockAToken public aToken;
     address public owner = address(this);
 
     function setUp() public {
         mockPool = new MockTydroPool();
         usdc = new MockERC20();
         xStock = new MockERC20();
+        aToken = new MockAToken();
         adapter = new TydroAdapter(address(mockPool), address(usdc), owner);
+
+        // Register aToken for xStock asset
+        mockPool.setAToken(address(xStock), address(aToken));
 
         // Fund the adapter
         usdc.mint(address(adapter), 100_000e6);
@@ -132,7 +162,8 @@ contract TydroAdapterTest is Test {
     }
 
     function test_getCollateralValue() public {
-        adapter.depositCollateral(address(xStock), 500e18);
+        // Set aToken balance to simulate deposited collateral
+        aToken.setBalance(address(adapter), 500e18);
         uint256 value = adapter.getCollateralValue(address(xStock));
         assertEq(value, 500e18);
     }

@@ -157,11 +157,20 @@ contract IssuanceGateTest is Test {
         assertTrue(approved, "should pass at exact minimum reserve");
     }
 
+    function test_rejectTVLCapExceeded() public {
+        // Activate notes worth 4.95M, then try to add 100k (total > 5M)
+        gate.noteActivated(4_950_000e6);
+        (bool approved, string memory reason) = gate.checkIssuance(noteId, 100_000e6, _defaultBasket());
+        assertFalse(approved);
+        assertEq(reason, "TVL cap exceeded");
+    }
+
     function test_constants() public view {
         assertEq(gate.MAX_ACTIVE_NOTES(), 500);
         assertEq(gate.MIN_NOTE_SIZE(), 100e6);
         assertEq(gate.MAX_NOTE_SIZE(), 100_000e6);
         assertEq(gate.RESERVE_MINIMUM_BPS(), 300);
+        assertEq(gate.MAX_TVL(), 5_000_000e6);
     }
 
     function test_setDependencies() public {

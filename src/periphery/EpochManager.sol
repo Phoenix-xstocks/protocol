@@ -36,6 +36,11 @@ contract EpochManager is IEpochManager, Ownable, ReentrancyGuard {
     ICarryEngine public carryEngine;
     IHedgeManager public hedgeManager;
 
+    /// @notice Treasury receives P6 equity residual
+    address public treasury;
+    /// @notice Coupon recipient receives P1/P3 funds (e.g. AutocallEngine)
+    address public couponRecipient;
+
     uint256 public currentEpoch;
     uint256 public epochStartTimestamp;
     uint256 public totalNotionalOutstanding;
@@ -88,6 +93,8 @@ contract EpochManager is IEpochManager, Ownable, ReentrancyGuard {
         address _feeCollector,
         address _carryEngine,
         address _hedgeManager,
+        address _treasury,
+        address _couponRecipient,
         address _owner
     ) Ownable(_owner) {
         require(_usdc != address(0), "zero usdc");
@@ -95,12 +102,16 @@ contract EpochManager is IEpochManager, Ownable, ReentrancyGuard {
         require(_feeCollector != address(0), "zero feeCollector");
         require(_carryEngine != address(0), "zero carryEngine");
         require(_hedgeManager != address(0), "zero hedgeManager");
+        require(_treasury != address(0), "zero treasury");
+        require(_couponRecipient != address(0), "zero couponRecipient");
 
         usdc = IERC20(_usdc);
         reserveFund = IReserveFund(_reserveFund);
         feeCollector = IFeeCollector(_feeCollector);
         carryEngine = ICarryEngine(_carryEngine);
         hedgeManager = IHedgeManager(_hedgeManager);
+        treasury = _treasury;
+        couponRecipient = _couponRecipient;
 
         epochStartTimestamp = block.timestamp;
     }
@@ -224,6 +235,13 @@ contract EpochManager is IEpochManager, Ownable, ReentrancyGuard {
         // P6 (EQUITY): Protocol treasury -- NEVER if P1 unpaid
         if (available > 0 && result.p1FullyPaid) {
             result.p6Paid = available;
+            usdc.safeTransfer(treasury, result.p6Paid);
+        }
+
+        // Transfer P1/P3 coupon funds to couponRecipient (e.g. AutocallEngine)
+        uint256 couponFunds = result.p1Paid + result.p3Paid;
+        if (couponFunds > 0) {
+            usdc.safeTransfer(couponRecipient, couponFunds);
         }
 
         lastResult = result;

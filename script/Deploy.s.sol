@@ -107,7 +107,7 @@ contract Deploy is Script {
 
         EpochManager epochManager = new EpochManager(
             USDC, address(reserveFund), address(feeCollector),
-            address(carryEngine), address(hedgeManager), deployer
+            address(carryEngine), address(hedgeManager), treasury, deployer, deployer
         );
         console.log("EpochManager:", address(epochManager));
 
@@ -118,7 +118,7 @@ contract Deploy is Script {
         AutocallEngine engine = new AutocallEngine(
             deployer, USDC, address(hedgeManager), address(creConsumer),
             address(issuanceGate), address(0), // CouponCalculator is library, pass zero
-            address(priceFeed)
+            address(priceFeed), address(volOracle), address(carryEngine)
         );
         console.log("AutocallEngine:", address(engine));
 

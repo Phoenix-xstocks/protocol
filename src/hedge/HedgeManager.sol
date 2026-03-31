@@ -7,14 +7,13 @@ import { ITydroAdapter } from "../interfaces/ITydroAdapter.sol";
 import { IOneInchSwapper } from "../interfaces/IOneInchSwapper.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @title HedgeManager
 /// @notice Orchestrates spot + perps + collateral for delta-neutral hedge.
 ///         Open/close/rebalance with delta drift monitoring and circuit breaker.
-contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard, Pausable {
+contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     uint256 public constant BPS = 10000;
@@ -49,6 +48,8 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard, Pausable {
 
     mapping(bytes32 => HedgePosition) internal positions;
     mapping(address => uint256) public pairIndexes; // xStock address -> Nado pair index
+    /// @notice Per-note circuit breaker pausing
+    mapping(bytes32 => bool) public notePaused;
 
     event HedgeOpened(bytes32 indexed noteId, uint256 notional, uint256 spotNotional, uint256 borrowed);
     event HedgeClosed(bytes32 indexed noteId, uint256 recovered, int256 pnl);
@@ -84,7 +85,8 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard, Pausable {
         bytes32 noteId,
         address[] calldata basket,
         uint256 notional
-    ) external onlyOwner nonReentrant whenNotPaused {
+    ) external onlyOwner nonReentrant {
+        require(!notePaused[noteId], "note paused");
         require(!positions[noteId].active, "hedge already active");
         require(basket.length > 0, "empty basket");
         require(notional > 0, "zero notional");
@@ -163,22 +165,26 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard, Pausable {
     }
 
     /// @inheritdoc IHedgeManager
-    function rebalance(bytes32 noteId) external nonReentrant whenNotPaused {
+    function rebalance(bytes32 noteId) external nonReentrant {
+        require(!notePaused[noteId], "note paused");
         HedgePosition storage pos = positions[noteId];
         require(pos.active, "hedge not active");
 
         int256 drift = _calculateDeltaDrift(noteId);
         uint256 absDrift = _abs(drift);
 
-        if (absDrift > DELTA_CRITICAL_BPS) {
-            _pause();
-            emit EmergencyPaused(noteId, "delta drift critical");
-            return;
-        }
-
         if (absDrift > DELTA_THRESHOLD_BPS) {
+            // Attempt adjustment first
             _adjustPerps(noteId, drift);
             emit HedgeRebalanced(noteId, drift);
+
+            // Check if drift is still critical after adjustment
+            int256 postDrift = _calculateDeltaDrift(noteId);
+            uint256 absPostDrift = _abs(postDrift);
+            if (absPostDrift > DELTA_CRITICAL_BPS) {
+                notePaused[noteId] = true;
+                emit EmergencyPaused(noteId, "delta drift critical after rebalance");
+            }
         }
     }
 
@@ -197,9 +203,9 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard, Pausable {
         return (pos.notional, pos.spotNotional, pos.tydroBorrowed, pos.active);
     }
 
-    /// @notice Unpause after emergency (owner only, e.g. multisig)
-    function unpause() external onlyOwner {
-        _unpause();
+    /// @notice Unpause a specific note after emergency (owner only, e.g. multisig)
+    function unpauseNote(bytes32 noteId) external onlyOwner {
+        notePaused[noteId] = false;
     }
 
     // --- Internal ---

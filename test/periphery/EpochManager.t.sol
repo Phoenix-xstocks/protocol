@@ -94,6 +94,7 @@ contract EpochManagerTest is Test {
 
     address public owner;
     address public treasury;
+    address public couponRecipient;
 
     uint256 constant TOTAL_NOTIONAL = 1_000_000e6;
     bytes32 constant NOTE_1 = bytes32(uint256(1));
@@ -102,6 +103,7 @@ contract EpochManagerTest is Test {
     function setUp() public {
         owner = address(this);
         treasury = address(0xBEEF);
+        couponRecipient = address(0xCAFE);
 
         usdc = new MockUSDC();
         carry = new MockCarryEngine();
@@ -115,6 +117,8 @@ contract EpochManagerTest is Test {
             address(feeCollector),
             address(carry),
             address(hedge),
+            treasury,
+            couponRecipient,
             owner
         );
 
@@ -245,7 +249,7 @@ contract EpochManagerTest is Test {
         // Redeploy epoch with funded reserve
         epoch = new EpochManager(
             address(usdc), address(reserve), address(feeCollector),
-            address(carry), address(hedge), owner
+            address(carry), address(hedge), treasury, couponRecipient, owner
         );
         reserve.transferOwnership(address(epoch));
 
@@ -271,7 +275,7 @@ contract EpochManagerTest is Test {
 
         epoch = new EpochManager(
             address(usdc), address(reserve), address(feeCollector),
-            address(carry), address(hedge), owner
+            address(carry), address(hedge), treasury, couponRecipient, owner
         );
         reserve.transferOwnership(address(epoch));
 

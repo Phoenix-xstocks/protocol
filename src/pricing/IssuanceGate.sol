@@ -19,6 +19,7 @@ contract IssuanceGate is IIssuanceGate, Ownable {
     uint256 public constant MIN_NOTE_SIZE = 100e6;
     uint256 public constant MAX_NOTE_SIZE = 100_000e6;
     uint256 public constant RESERVE_MINIMUM_BPS = 300;
+    uint256 public constant MAX_TVL = 5_000_000e6;
 
     ICREConsumer public creConsumer;
     IHedgeManager public hedgeManager;
@@ -67,6 +68,15 @@ contract IssuanceGate is IIssuanceGate, Ownable {
         }
         if (notional > MAX_NOTE_SIZE) {
             return (false, "notional above maximum");
+        }
+
+        if (totalNotionalOutstanding + notional > MAX_TVL) {
+            return (false, "TVL cap exceeded");
+        }
+
+        // Basic hedge capacity check: verify hedgeManager is operational
+        if (address(hedgeManager) == address(0)) {
+            return (false, "no hedge capacity");
         }
 
         return (true, "");

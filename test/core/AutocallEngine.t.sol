@@ -8,6 +8,8 @@ import { IHedgeManager } from "../../src/interfaces/IHedgeManager.sol";
 import { ICREConsumer, PricingResult } from "../../src/interfaces/ICREConsumer.sol";
 import { IIssuanceGate } from "../../src/interfaces/IIssuanceGate.sol";
 import { ICouponCalculator } from "../../src/interfaces/ICouponCalculator.sol";
+import { IVolOracle } from "../../src/interfaces/IVolOracle.sol";
+import { ICarryEngine } from "../../src/interfaces/ICarryEngine.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 // ================================================================
@@ -103,6 +105,25 @@ contract MockCouponCalculator is ICouponCalculator {
     }
 }
 
+contract MockVolOracle is IVolOracle {
+    mapping(address => uint256) public vols;
+    uint256 public avgCorr = 5000; // 50% default
+
+    function setVol(address asset, uint256 volBps) external { vols[asset] = volBps; }
+
+    function updateVols(address[] calldata, uint256[] calldata, uint256[] calldata) external {}
+    function getVol(address asset) external view returns (uint256) { return vols[asset] > 0 ? vols[asset] : 4500; }
+    function getAvgCorrelation(address[] calldata) external view returns (uint256) { return avgCorr; }
+    function getLastUpdate() external view returns (uint256) { return block.timestamp; }
+}
+
+contract MockCarryEngine is ICarryEngine {
+    function collectCarry(bytes32) external pure returns (uint256, uint256) { return (0, 0); }
+    function getTotalCarryRate() external pure returns (uint256) { return 900; } // 9% total carry
+    function getFundingRate() external pure returns (uint256) { return 550; }
+    function getLendingRate() external pure returns (uint256) { return 350; }
+}
+
 contract MockPriceFeed is IPriceFeed {
     mapping(bytes32 => int192) public prices;
 
@@ -127,6 +148,8 @@ contract AutocallEngineTest is Test {
     MockIssuanceGate public gate;
     MockCouponCalculator public couponCalc;
     MockPriceFeed public priceFeed;
+    MockVolOracle public volOracle;
+    MockCarryEngine public mockCarry;
 
     address admin = address(this);
     address keeper = address(0xBEEF);
@@ -147,6 +170,8 @@ contract AutocallEngineTest is Test {
         gate = new MockIssuanceGate();
         couponCalc = new MockCouponCalculator();
         priceFeed = new MockPriceFeed();
+        volOracle = new MockVolOracle();
+        mockCarry = new MockCarryEngine();
 
         engine = new AutocallEngine(
             admin,
@@ -155,7 +180,9 @@ contract AutocallEngineTest is Test {
             address(cre),
             address(gate),
             address(couponCalc),
-            address(priceFeed)
+            address(priceFeed),
+            address(volOracle),
+            address(mockCarry)
         );
 
         engine.grantRole(engine.KEEPER_ROLE(), keeper);
@@ -506,7 +533,7 @@ contract AutocallEngineTest is Test {
         // worst perf = 120/200 * 10000 = 6000 bps (60%) < 70% coupon barrier
 
         // Also set prices low enough to avoid autocall trigger
-        // trigger after 1 obs = 10000 - 200 = 9800 bps. worst = 6000 < 9800 → no autocall
+        // trigger obs 1 = 10000 bps (100%). worst = 6000 < 10000 → no autocall
         engine.observe(noteId);
 
         // Should return to Active (not autocalled, not last obs)
@@ -525,7 +552,7 @@ contract AutocallEngineTest is Test {
         // Set token B to 80% of initial (200e8 -> 160e8)
         priceFeed.setPrice(FEED_B, 160e8);
         // worst perf = 160/200 * 10000 = 8000 bps (80%) >= 70% barrier
-        // trigger after 1 obs = 9800 bps. 8000 < 9800 → no autocall
+        // trigger obs 1 = 10000 bps. 8000 < 10000 → no autocall
 
         uint256 holderBefore = usdc.balanceOf(holder);
         engine.observe(noteId);
@@ -543,10 +570,11 @@ contract AutocallEngineTest is Test {
         priceFeed.setPrice(FEED_C, 120e8);
         // worst perf = 120/300 * 10000 = 4000 bps (40%) < 50% KI barrier
 
-        // Run through all 6 observations
+        // Run through all 6 observations (warp 30+ days between each)
+        uint256 t = block.timestamp;
         for (uint256 i = 0; i < 6; i++) {
+            vm.warp(t + (i * 31 days));
             engine.observe(noteId);
-            // After last observation (i==5), should go to KISettle
             if (i < 5) {
                 assertEq(uint256(engine.getState(noteId)), uint256(State.Active));
             }
@@ -565,7 +593,9 @@ contract AutocallEngineTest is Test {
         // worst perf = 110/200 * 10000 = 5500 bps (55%) >= 50% KI, < 70% coupon
 
         // Run through all 6 observations
+        uint256 t = block.timestamp;
         for (uint256 i = 0; i < 6; i++) {
+            vm.warp(t + (i * 31 days));
             engine.observe(noteId);
         }
 
@@ -577,11 +607,11 @@ contract AutocallEngineTest is Test {
     function test_settleKI_physical() public {
         bytes32 noteId = _createPriceAndActivate();
         usdc.mint(address(engine), 1_000_000e6);
-
-        // Drop below KI
         priceFeed.setPrice(FEED_C, 120e8); // 40% of 300e8
 
+        uint256 t = block.timestamp;
         for (uint256 i = 0; i < 6; i++) {
+            vm.warp(t + (i * 31 days));
             engine.observe(noteId);
         }
         assertEq(uint256(engine.getState(noteId)), uint256(State.KISettle));
@@ -598,11 +628,11 @@ contract AutocallEngineTest is Test {
     function test_settleKI_cash() public {
         bytes32 noteId = _createPriceAndActivate();
         usdc.mint(address(engine), 1_000_000e6);
-
-        // Drop below KI
         priceFeed.setPrice(FEED_C, 120e8); // 40% of 300e8
 
+        uint256 t = block.timestamp;
         for (uint256 i = 0; i < 6; i++) {
+            vm.warp(t + (i * 31 days));
             engine.observe(noteId);
         }
         assertEq(uint256(engine.getState(noteId)), uint256(State.KISettle));
@@ -632,7 +662,8 @@ contract AutocallEngineTest is Test {
 
         // Obs 2: autocall (prices recover to 100%)
         priceFeed.setPrice(FEED_B, 200e8);
-        // trigger after 2 obs = 10000 - 400 = 9600 bps. perf = 10000 >= 9600 → autocall
+        // trigger after 1 obs = 10000 - 200 = 9800 bps. perf = 10000 >= 9800 → autocall
+        vm.warp(block.timestamp + 31 days);
 
         uint256 holderBefore = usdc.balanceOf(holder);
         engine.observe(noteId);

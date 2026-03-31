@@ -260,7 +260,7 @@ contract HedgeManagerTest is Test {
         hedge.rebalance(NOTE_ID);
     }
 
-    function test_rebalance_circuitBreaker_critical_drift() public {
+    function test_rebalance_critical_drift_fixed_by_adjust() public {
         address[] memory basket = _makeBasket();
         hedge.openHedge(NOTE_ID, basket, NOTIONAL);
 
@@ -270,26 +270,21 @@ contract HedgeManagerTest is Test {
         tydro.setCollateralValue(address(tslax), perStock * 120 / 100);
         tydro.setCollateralValue(address(metax), perStock * 120 / 100);
 
+        // After rebalance, adjustment aligns perps to spot, drift -> 0
         hedge.rebalance(NOTE_ID);
-        assertTrue(hedge.paused());
+        assertFalse(hedge.notePaused(NOTE_ID), "note should not be paused when adjustment fixes drift");
     }
 
-    function test_unpause_onlyOwner() public {
-        address[] memory basket = _makeBasket();
-        hedge.openHedge(NOTE_ID, basket, NOTIONAL);
-
-        uint256 perStock = NOTIONAL / 3;
-        tydro.setCollateralValue(address(nvdax), perStock * 120 / 100);
-        tydro.setCollateralValue(address(tslax), perStock * 120 / 100);
-        tydro.setCollateralValue(address(metax), perStock * 120 / 100);
-        hedge.rebalance(NOTE_ID);
+    function test_unpauseNote_onlyOwner() public {
+        bytes32 noteId = bytes32(uint256(42));
 
         vm.prank(address(0xdead));
         vm.expectRevert();
-        hedge.unpause();
+        hedge.unpauseNote(noteId);
 
-        hedge.unpause();
-        assertFalse(hedge.paused());
+        // Owner can call unpauseNote
+        hedge.unpauseNote(noteId);
+        assertFalse(hedge.notePaused(noteId));
     }
 
     function test_getDeltaDrift_inactive_returns_zero() public view {

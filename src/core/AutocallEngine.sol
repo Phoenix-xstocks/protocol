@@ -10,6 +10,8 @@ import { IHedgeManager } from "../interfaces/IHedgeManager.sol";
 import { ICREConsumer, PricingResult } from "../interfaces/ICREConsumer.sol";
 import { IIssuanceGate } from "../interfaces/IIssuanceGate.sol";
 import { ICouponCalculator } from "../interfaces/ICouponCalculator.sol";
+import { IVolOracle } from "../interfaces/IVolOracle.sol";
+import { ICarryEngine } from "../interfaces/ICarryEngine.sol";
 
 /// @notice Minimal interface for reading latest verified prices.
 interface IPriceFeed {
@@ -39,6 +41,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     uint16 public constant STEP_DOWN_BPS = 200; // 2% per obs
     uint16 public constant KI_BARRIER_BPS = 5_000; // 50%
     uint256 public constant MATURITY_DAYS = 180;
+    uint256 public constant PRICE_MAX_STALENESS = 24 hours; // per spec section 15
 
     // ----------------------------------------------------------------
     // Note structure
@@ -54,6 +57,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         uint256 baseCouponBps; // fixed at issuance
         uint256 createdAt;
         uint256 maturityDate;
+        uint256 lastObservationTime; // enforce minimum interval between observations
         int256[] initialPrices; // initial spot prices for perf calc
     }
 
@@ -70,6 +74,8 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     IIssuanceGate public immutable issuanceGate;
     ICouponCalculator public immutable couponCalculator;
     IPriceFeed public immutable priceFeed;
+    IVolOracle public immutable volOracle;
+    ICarryEngine public immutable carryEngine;
 
     /// @notice Maps xStock token address -> Chainlink Data Streams feed ID
     mapping(address => bytes32) public feedIds;
@@ -78,6 +84,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     // Events
     // ----------------------------------------------------------------
     event NoteCreated(bytes32 indexed noteId, address indexed holder, uint256 notional);
+    event RequestPricing(bytes32 indexed noteId, address[] basket, uint256 notional);
     event NoteStateChanged(bytes32 indexed noteId, State from, State to);
     event CouponPaid(bytes32 indexed noteId, uint256 amount, uint256 memoryPaid);
     event CouponMissed(bytes32 indexed noteId, uint256 memoryAccumulated);
@@ -96,6 +103,8 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     error InvalidBasket();
     error IssuanceNotApproved(string reason);
     error NoteNotFound();
+    error ObservationTooEarly(uint256 earliest, uint256 current);
+    error StalePriceFeed(bytes32 feedId, uint32 feedTimestamp);
 
     // ----------------------------------------------------------------
     // Constructor
@@ -107,7 +116,9 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         address _creConsumer,
         address _issuanceGate,
         address _couponCalculator,
-        address _priceFeed
+        address _priceFeed,
+        address _volOracle,
+        address _carryEngine
     ) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         usdc = IERC20(_usdc);
@@ -116,6 +127,8 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         issuanceGate = IIssuanceGate(_issuanceGate);
         couponCalculator = ICouponCalculator(_couponCalculator);
         priceFeed = IPriceFeed(_priceFeed);
+        volOracle = IVolOracle(_volOracle);
+        carryEngine = ICarryEngine(_carryEngine);
     }
 
     /// @notice Set the Chainlink feed ID for an xStock token. Admin only.
@@ -146,6 +159,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         returns (bytes32 noteId)
     {
         if (basket.length != 3) revert InvalidBasket();
+        require(notional > 0, "zero notional");
 
         noteId = keccak256(abi.encodePacked(basket, notional, holder, block.timestamp, noteCount));
 
@@ -161,6 +175,8 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         noteCount++;
 
         emit NoteCreated(noteId, holder, notional);
+        // CRE workflow triggers on this event to start pricing
+        emit RequestPricing(noteId, basket, notional);
     }
 
     // ----------------------------------------------------------------
@@ -168,14 +184,26 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     // ----------------------------------------------------------------
 
     /// @notice Called after CRE pricing is accepted. Transitions CREATED -> PRICED.
+    ///         Reads actual vol from VolOracle and carry rate from CarryEngine
+    ///         to compute dynamic safety margin and carry enhancement per spec section 5.
     function priceNote(bytes32 noteId, int256[] calldata initialPrices) external onlyRole(KEEPER_ROLE) {
         Note storage note = _notes[noteId];
         _requireState(noteId, State.Created);
 
         PricingResult memory pricing = creConsumer.getAcceptedPricing(noteId);
 
+        // Fetch average vol across basket for dynamic safety margin
+        uint256 avgVol = 0;
+        for (uint256 i = 0; i < note.basket.length; i++) {
+            avgVol += volOracle.getVol(note.basket[i]);
+        }
+        avgVol = avgVol / note.basket.length;
+
+        // Fetch carry rate for carry enhancement
+        uint256 carryRate = carryEngine.getTotalCarryRate();
+
         (uint256 baseBps, , uint256 totalBps) =
-            couponCalculator.calculateCoupon(pricing.putPremiumBps, 0, 0);
+            couponCalculator.calculateCoupon(pricing.putPremiumBps, avgVol, carryRate);
 
         note.baseCouponBps = baseBps;
         note.totalCouponBps = totalBps;
@@ -189,6 +217,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     // ----------------------------------------------------------------
 
     /// @notice Transitions PRICED -> ACTIVE after issuance gate approval (INV-6).
+    ///         Opens the delta-neutral hedge (spot + perps) per spec section 10.
     function activateNote(bytes32 noteId) external onlyRole(KEEPER_ROLE) {
         Note storage note = _notes[noteId];
         _requireState(noteId, State.Priced);
@@ -196,6 +225,9 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         (bool approved, string memory reason) =
             issuanceGate.checkIssuance(noteId, note.notional, note.basket);
         if (!approved) revert IssuanceNotApproved(reason);
+
+        // Open delta-neutral hedge before activating
+        hedgeManager.openHedge(noteId, note.basket, note.notional);
 
         _transition(noteId, State.Active);
     }
@@ -211,18 +243,27 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
             revert InvalidState(note.state, State.Active);
         }
 
+        // Enforce minimum interval between observations (~30 days)
+        uint256 earliest = note.lastObservationTime + (OBS_INTERVAL_DAYS * 1 days);
+        if (note.lastObservationTime > 0 && block.timestamp < earliest) {
+            revert ObservationTooEarly(earliest, block.timestamp);
+        }
+        note.lastObservationTime = block.timestamp;
+
         // Move to observation pending if not already
         if (note.state == State.Active) {
             _transition(noteId, State.ObservationPending);
         }
 
-        note.observations++;
-
-        // 1. Get worst-of performance
+        // 1. Get worst-of performance (also checks price staleness)
         uint256 worstPerfBps = _getWorstPerformance(note);
 
         // 2. Check autocall trigger (with step-down)
+        // Obs 1: trigger=100%, Obs 2: 98%, Obs 3: 96%, ..., Obs 6: 90%
         uint256 triggerBps = AUTOCALL_TRIGGER_BPS - (uint256(STEP_DOWN_BPS) * note.observations);
+
+        // Increment observations AFTER trigger calc to avoid off-by-one
+        note.observations++;
         if (worstPerfBps >= triggerBps) {
             // Autocalled: pay all coupons (current + memory) then settle
             _payCoupon(noteId, note, true);
@@ -410,8 +451,11 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
             bytes32 feedId = feedIds[note.basket[i]];
             require(feedId != bytes32(0), "feed not configured");
 
-            (int192 currentPrice,) = priceFeed.getLatestPrice(feedId);
+            (int192 currentPrice, uint32 feedTimestamp) = priceFeed.getLatestPrice(feedId);
             require(currentPrice > 0, "invalid current price");
+            if (block.timestamp - feedTimestamp > PRICE_MAX_STALENESS) {
+                revert StalePriceFeed(feedId, feedTimestamp);
+            }
 
             // perf = currentPrice / initialPrice * BPS
             uint256 perf = (uint256(int256(currentPrice)) * BPS) / uint256(note.initialPrices[i]);
@@ -462,6 +506,14 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     }
 
     function _settleNoKI(bytes32 noteId, Note storage note) internal {
+        // Pay out any accumulated memory coupons before settling
+        if (note.memoryCoupon > 0) {
+            uint256 memoryPaid = note.memoryCoupon;
+            note.memoryCoupon = 0;
+            usdc.safeTransfer(note.holder, memoryPaid);
+            emit CouponPaid(noteId, 0, memoryPaid);
+        }
+
         uint256 recovered = hedgeManager.closeHedge(noteId);
         uint256 payout = note.notional < recovered ? note.notional : recovered;
         usdc.safeTransfer(note.holder, payout);

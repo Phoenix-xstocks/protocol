@@ -12,5 +12,9 @@ interface ISablierStream {
 
     function cancelStream(uint256 streamId) external;
 
+    function cancelAllNoteStreams(bytes32 noteId) external returns (uint256 totalRefunded);
+
     function getStreamedAmount(uint256 streamId) external view returns (uint256);
+
+    function getNoteStreams(bytes32 noteId) external view returns (uint256[] memory);
 }

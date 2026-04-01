@@ -25,6 +25,7 @@ import { TydroAdapter } from "../src/integrations/TydroAdapter.sol";
 import { OneInchSwapper } from "../src/integrations/OneInchSwapper.sol";
 import { IOneInchSwapper } from "../src/interfaces/IOneInchSwapper.sol";
 import { PythAdapter } from "../src/integrations/PythAdapter.sol";
+import { CouponStreamer } from "../src/integrations/SablierStream.sol";
 
 // Periphery
 import { ReserveFund } from "../src/periphery/ReserveFund.sol";
@@ -49,7 +50,6 @@ contract Deploy is Script {
     address constant PYTH = 0x2880aB155794e7179c9eE2e38200202908C17B43; // Pyth on Ink Sepolia
     // Chainlink CRE KeystoneForwarder on Ink Sepolia (production)
     address constant CRE_FORWARDER = 0x76c9cf548b4179F8901cda1f8623568b58215E62;
-
     function run() external {
         uint256 deployerPk = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerPk);
@@ -86,6 +86,10 @@ contract Deploy is Script {
 
         PythAdapter priceFeed = new PythAdapter(PYTH, deployer);
         console.log("PythAdapter:", address(priceFeed));
+
+        // Coupon streaming (self-contained linear vesting, no external Sablier needed)
+        CouponStreamer couponStreamer = new CouponStreamer(USDC, deployer);
+        console.log("CouponStreamer:", address(couponStreamer));
 
         // ---- 3. Hedge layer ----
         HedgeManager hedgeManager = new HedgeManager(
@@ -169,6 +173,10 @@ contract Deploy is Script {
         // Set fee collector on vault
         vault.setFeeCollector(address(feeCollector));
 
+        // Wire coupon streaming into AutocallEngine and transfer ownership
+        engine.setSablierStream(address(couponStreamer));
+        couponStreamer.transferOwnership(address(engine));
+
         vm.stopBroadcast();
 
         // ---- Summary ----
@@ -187,6 +195,7 @@ contract Deploy is Script {
         console.log("FeeCollector:       ", address(feeCollector));
         console.log("IssuanceGate:       ", address(issuanceGate));
         console.log("EpochManager:       ", address(epochManager));
+        console.log("CouponStreamer:      ", address(couponStreamer));
         console.log("NoteToken:          ", address(noteToken));
         console.log("AutocallEngine:     ", address(engine));
         console.log("XYieldVault:        ", address(vault));

@@ -23,7 +23,7 @@ import { CarryEngine } from "../src/hedge/CarryEngine.sol";
 import { NadoAdapter } from "../src/integrations/NadoAdapter.sol";
 import { TydroAdapter } from "../src/integrations/TydroAdapter.sol";
 import { OneInchSwapper } from "../src/integrations/OneInchSwapper.sol";
-import { ChainlinkPriceFeed } from "../src/integrations/ChainlinkPriceFeed.sol";
+import { PythAdapter } from "../src/integrations/PythAdapter.sol";
 
 // Periphery
 import { ReserveFund } from "../src/periphery/ReserveFund.sol";
@@ -45,8 +45,8 @@ contract Deploy is Script {
     address constant MOCK_NADO_PERP = address(0x1001);
     address constant MOCK_TYDRO_POOL = address(0x1002);
     address constant MOCK_1INCH_ROUTER = address(0x1003);
-    address constant MOCK_VERIFIER_PROXY = address(0x1005);
-    address constant MOCK_CRE_ROUTER = address(0x1006);
+    // Pyth on Ink Sepolia
+    address constant PYTH = 0x2880aB155794e7179c9eE2e38200202908C17B43;
 
     function run() external {
         uint256 deployerPk = vm.envUint("PRIVATE_KEY");
@@ -65,7 +65,7 @@ contract Deploy is Script {
         OptionPricer optionPricer = new OptionPricer(address(volOracle), deployer);
         console.log("OptionPricer:", address(optionPricer));
 
-        CREConsumer creConsumer = new CREConsumer(MOCK_CRE_ROUTER, address(optionPricer), deployer);
+        CREConsumer creConsumer = new CREConsumer(address(1), address(optionPricer), deployer);
         console.log("CREConsumer:", address(creConsumer));
 
         CouponCalculator couponCalculator = new CouponCalculator();
@@ -81,8 +81,8 @@ contract Deploy is Script {
         OneInchSwapper swapper = new OneInchSwapper(MOCK_1INCH_ROUTER, deployer);
         console.log("OneInchSwapper:", address(swapper));
 
-        ChainlinkPriceFeed priceFeed = new ChainlinkPriceFeed(MOCK_VERIFIER_PROXY, deployer);
-        console.log("ChainlinkPriceFeed:", address(priceFeed));
+        PythAdapter priceFeed = new PythAdapter(PYTH, deployer);
+        console.log("PythAdapter:", address(priceFeed));
 
         // ---- 3. Hedge layer ----
         HedgeManager hedgeManager = new HedgeManager(
@@ -171,7 +171,7 @@ contract Deploy is Script {
         console.log("NadoAdapter:        ", address(nado));
         console.log("TydroAdapter:       ", address(tydro));
         console.log("OneInchSwapper:     ", address(swapper));
-        console.log("ChainlinkPriceFeed: ", address(priceFeed));
+        console.log("PythAdapter:        ", address(priceFeed));
         console.log("HedgeManager:       ", address(hedgeManager));
         console.log("CarryEngine:        ", address(carryEngine));
         console.log("ReserveFund:        ", address(reserveFund));

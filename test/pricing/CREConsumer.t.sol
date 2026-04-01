@@ -2,9 +2,10 @@
 pragma solidity ^0.8.24;
 
 import { Test } from "forge-std/Test.sol";
-import { CREConsumer } from "../../src/pricing/CREConsumer.sol";
+import { CREConsumer, IReceiver } from "../../src/pricing/CREConsumer.sol";
 import { PricingResult } from "../../src/interfaces/ICREConsumer.sol";
 import { IOptionPricer, PricingParams } from "../../src/interfaces/IOptionPricer.sol";
+import { IERC165 } from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 contract MockOptionPricer is IOptionPricer {
     bool public approveAll = true;
@@ -32,7 +33,7 @@ contract CREConsumerTest is Test {
     MockOptionPricer public pricer;
 
     address owner = address(this);
-    address creRouter = address(0xCCCC);
+    address forwarderAddr = address(0xCCCC);
     address nonOwner = address(0xDEAD);
 
     bytes32 constant NOTE_1 = bytes32(uint256(1));
@@ -41,7 +42,7 @@ contract CREConsumerTest is Test {
 
     function setUp() public {
         pricer = new MockOptionPricer();
-        consumer = new CREConsumer(creRouter, address(pricer), owner);
+        consumer = new CREConsumer(forwarderAddr, address(pricer), owner);
     }
 
     function _defaultParams() internal pure returns (PricingParams memory) {
@@ -70,10 +71,35 @@ contract CREConsumerTest is Test {
         });
     }
 
+    /// @dev Build metadata: abi.encodePacked(bytes32 workflowId, bytes10 workflowName, address workflowOwner)
+    function _buildMetadata(address workflowOwner) internal pure returns (bytes memory) {
+        bytes32 workflowId = bytes32(uint256(0x1234));
+        bytes10 workflowName = bytes10(bytes32(uint256(0x5678)));
+        return abi.encodePacked(workflowId, workflowName, workflowOwner);
+    }
+
+    /// @dev Build report: abi.encode(bytes32 noteId, PricingResult result)
+    function _buildReport(bytes32 noteId, PricingResult memory result) internal pure returns (bytes memory) {
+        return abi.encode(noteId, result);
+    }
+
     function _registerAndFulfill(bytes32 noteId) internal {
         consumer.registerNoteParams(noteId, _defaultParams());
-        vm.prank(creRouter);
-        consumer.fulfillPricing(noteId, _defaultPricingResult());
+        bytes memory metadata = _buildMetadata(address(0));
+        bytes memory report = _buildReport(noteId, _defaultPricingResult());
+        vm.prank(forwarderAddr);
+        consumer.onReport(metadata, report);
+    }
+
+    // ---------------------------------------------------------------
+    // ERC165 support
+    // ---------------------------------------------------------------
+    function test_supportsInterface_IReceiver() public view {
+        assertTrue(consumer.supportsInterface(type(IReceiver).interfaceId));
+    }
+
+    function test_supportsInterface_IERC165() public view {
+        assertTrue(consumer.supportsInterface(type(IERC165).interfaceId));
     }
 
     // ---------------------------------------------------------------
@@ -118,109 +144,116 @@ contract CREConsumerTest is Test {
     }
 
     // ---------------------------------------------------------------
-    // fulfillPricing: success path
+    // onReport: success path
     // ---------------------------------------------------------------
-    function test_fulfillPricing_success() public {
+    function test_onReport_success() public {
         consumer.registerNoteParams(NOTE_1, _defaultParams());
 
         PricingResult memory result = _defaultPricingResult();
+        bytes memory metadata = _buildMetadata(address(0));
+        bytes memory report = _buildReport(NOTE_1, result);
 
-        vm.prank(creRouter);
+        vm.prank(forwarderAddr);
         vm.expectEmit(true, false, false, true);
         emit CREConsumer.PricingAccepted(NOTE_1, result.putPremiumBps, result.kiProbabilityBps);
-        consumer.fulfillPricing(NOTE_1, result);
+        consumer.onReport(metadata, report);
 
         assertTrue(consumer.isPricingAccepted(NOTE_1));
     }
 
     // ---------------------------------------------------------------
-    // fulfillPricing: only CRE router
+    // onReport: only forwarder
     // ---------------------------------------------------------------
-    function test_fulfillPricing_revertsForNonRouter() public {
+    function test_onReport_revertsForNonForwarder() public {
         consumer.registerNoteParams(NOTE_1, _defaultParams());
+        bytes memory metadata = _buildMetadata(address(0));
+        bytes memory report = _buildReport(NOTE_1, _defaultPricingResult());
 
         vm.prank(nonOwner);
-        vm.expectRevert("only CRE router");
-        consumer.fulfillPricing(NOTE_1, _defaultPricingResult());
+        vm.expectRevert("only forwarder");
+        consumer.onReport(metadata, report);
     }
 
     // ---------------------------------------------------------------
-    // fulfillPricing: note must be registered
+    // onReport: note must be registered
     // ---------------------------------------------------------------
-    function test_fulfillPricing_revertsWhenNoteNotRegistered() public {
-        vm.prank(creRouter);
+    function test_onReport_revertsWhenNoteNotRegistered() public {
+        bytes memory metadata = _buildMetadata(address(0));
+        bytes memory report = _buildReport(NOTE_1, _defaultPricingResult());
+
+        vm.prank(forwarderAddr);
         vm.expectRevert("note not registered");
-        consumer.fulfillPricing(NOTE_1, _defaultPricingResult());
+        consumer.onReport(metadata, report);
     }
 
     // ---------------------------------------------------------------
-    // fulfillPricing: bounds check (MIN/MAX_PREMIUM)
+    // onReport: bounds check (MIN/MAX_PREMIUM)
     // ---------------------------------------------------------------
-    function test_fulfillPricing_revertsOnPremiumTooLow() public {
+    function test_onReport_revertsOnPremiumTooLow() public {
         consumer.registerNoteParams(NOTE_1, _defaultParams());
 
         PricingResult memory result = _defaultPricingResult();
         result.putPremiumBps = 299; // below MIN_PREMIUM (300)
 
-        vm.prank(creRouter);
+        vm.prank(forwarderAddr);
         vm.expectRevert("premium too low");
-        consumer.fulfillPricing(NOTE_1, result);
+        consumer.onReport(_buildMetadata(address(0)), _buildReport(NOTE_1, result));
     }
 
-    function test_fulfillPricing_revertsOnPremiumTooHigh() public {
+    function test_onReport_revertsOnPremiumTooHigh() public {
         consumer.registerNoteParams(NOTE_1, _defaultParams());
 
         PricingResult memory result = _defaultPricingResult();
         result.putPremiumBps = 1501; // above MAX_PREMIUM (1500)
 
-        vm.prank(creRouter);
+        vm.prank(forwarderAddr);
         vm.expectRevert("premium too high");
-        consumer.fulfillPricing(NOTE_1, result);
+        consumer.onReport(_buildMetadata(address(0)), _buildReport(NOTE_1, result));
     }
 
-    function test_fulfillPricing_premiumAtMinBoundary() public {
+    function test_onReport_premiumAtMinBoundary() public {
         consumer.registerNoteParams(NOTE_1, _defaultParams());
 
         PricingResult memory result = _defaultPricingResult();
         result.putPremiumBps = 300; // exactly MIN_PREMIUM
 
-        vm.prank(creRouter);
-        consumer.fulfillPricing(NOTE_1, result);
+        vm.prank(forwarderAddr);
+        consumer.onReport(_buildMetadata(address(0)), _buildReport(NOTE_1, result));
         assertTrue(consumer.isPricingAccepted(NOTE_1));
     }
 
-    function test_fulfillPricing_premiumAtMaxBoundary() public {
+    function test_onReport_premiumAtMaxBoundary() public {
         consumer.registerNoteParams(NOTE_1, _defaultParams());
 
         PricingResult memory result = _defaultPricingResult();
         result.putPremiumBps = 1500; // exactly MAX_PREMIUM
 
-        vm.prank(creRouter);
-        consumer.fulfillPricing(NOTE_1, result);
+        vm.prank(forwarderAddr);
+        consumer.onReport(_buildMetadata(address(0)), _buildReport(NOTE_1, result));
         assertTrue(consumer.isPricingAccepted(NOTE_1));
     }
 
-    function test_fulfillPricing_revertsOnKIProbTooHigh() public {
+    function test_onReport_revertsOnKIProbTooHigh() public {
         consumer.registerNoteParams(NOTE_1, _defaultParams());
 
         PricingResult memory result = _defaultPricingResult();
         result.kiProbabilityBps = 1501; // above MAX_KI_PROB (1500)
 
-        vm.prank(creRouter);
+        vm.prank(forwarderAddr);
         vm.expectRevert("KI prob too high");
-        consumer.fulfillPricing(NOTE_1, result);
+        consumer.onReport(_buildMetadata(address(0)), _buildReport(NOTE_1, result));
     }
 
     // ---------------------------------------------------------------
-    // fulfillPricing: cross-check with OptionPricer
+    // onReport: cross-check with OptionPricer
     // ---------------------------------------------------------------
-    function test_fulfillPricing_revertsOnOptionPricerRejection() public {
+    function test_onReport_revertsOnOptionPricerRejection() public {
         consumer.registerNoteParams(NOTE_1, _defaultParams());
         pricer.setApproveAll(false);
 
-        vm.prank(creRouter);
+        vm.prank(forwarderAddr);
         vm.expectRevert("CRE vs on-chain divergence");
-        consumer.fulfillPricing(NOTE_1, _defaultPricingResult());
+        consumer.onReport(_buildMetadata(address(0)), _buildReport(NOTE_1, _defaultPricingResult()));
     }
 
     // ---------------------------------------------------------------
@@ -255,13 +288,13 @@ contract CREConsumerTest is Test {
     // ---------------------------------------------------------------
     // Duplicate pricing rejection
     // ---------------------------------------------------------------
-    function test_fulfillPricing_revertsDuplicateAcceptance() public {
+    function test_onReport_revertsDuplicateAcceptance() public {
         _registerAndFulfill(NOTE_1);
 
         // Try to fulfill again
-        vm.prank(creRouter);
+        vm.prank(forwarderAddr);
         vm.expectRevert("already accepted");
-        consumer.fulfillPricing(NOTE_1, _defaultPricingResult());
+        consumer.onReport(_buildMetadata(address(0)), _buildReport(NOTE_1, _defaultPricingResult()));
     }
 
     // ---------------------------------------------------------------
@@ -299,19 +332,74 @@ contract CREConsumerTest is Test {
     }
 
     // ---------------------------------------------------------------
+    // setForwarder
+    // ---------------------------------------------------------------
+    function test_setForwarder() public {
+        address newForwarder = address(0xBEEF);
+        consumer.setForwarder(newForwarder);
+        assertEq(consumer.forwarder(), newForwarder);
+    }
+
+    function test_setForwarder_revertsOnZero() public {
+        vm.expectRevert("zero forwarder");
+        consumer.setForwarder(address(0));
+    }
+
+    function test_setForwarder_onlyOwner() public {
+        vm.prank(nonOwner);
+        vm.expectRevert();
+        consumer.setForwarder(address(0xBEEF));
+    }
+
+    function test_setForwarder_emitsEvent() public {
+        address newForwarder = address(0xBEEF);
+        vm.expectEmit(true, false, false, false);
+        emit CREConsumer.ForwarderUpdated(newForwarder);
+        consumer.setForwarder(newForwarder);
+    }
+
+    // ---------------------------------------------------------------
+    // Workflow owner validation
+    // ---------------------------------------------------------------
+    function test_onReport_validatesWorkflowOwner() public {
+        address expectedOwner = address(0x9999);
+        consumer.setExpectedWorkflowOwner(expectedOwner);
+        consumer.registerNoteParams(NOTE_1, _defaultParams());
+
+        // Wrong workflow owner
+        vm.prank(forwarderAddr);
+        vm.expectRevert("unexpected workflow owner");
+        consumer.onReport(_buildMetadata(address(0x1111)), _buildReport(NOTE_1, _defaultPricingResult()));
+
+        // Correct workflow owner
+        vm.prank(forwarderAddr);
+        consumer.onReport(_buildMetadata(expectedOwner), _buildReport(NOTE_1, _defaultPricingResult()));
+        assertTrue(consumer.isPricingAccepted(NOTE_1));
+    }
+
+    function test_onReport_skipsOwnerValidationWhenNotSet() public {
+        // expectedWorkflowOwner is address(0) by default — no validation
+        consumer.registerNoteParams(NOTE_1, _defaultParams());
+
+        vm.prank(forwarderAddr);
+        consumer.onReport(_buildMetadata(address(0x9999)), _buildReport(NOTE_1, _defaultPricingResult()));
+        assertTrue(consumer.isPricingAccepted(NOTE_1));
+    }
+
+    // ---------------------------------------------------------------
     // Constructor validations
     // ---------------------------------------------------------------
-    function test_constructor_revertsZeroRouter() public {
-        vm.expectRevert("zero router");
+    function test_constructor_revertsZeroForwarder() public {
+        vm.expectRevert("zero forwarder");
         new CREConsumer(address(0), address(pricer), owner);
     }
 
     function test_constructor_revertsZeroPricer() public {
         vm.expectRevert("zero pricer");
-        new CREConsumer(creRouter, address(0), owner);
+        new CREConsumer(forwarderAddr, address(0), owner);
     }
 
-    function test_creRouter_isImmutable() public view {
-        assertEq(consumer.creRouter(), creRouter);
+    function test_forwarder_isSetCorrectly() public view {
+        assertEq(consumer.forwarder(), forwarderAddr);
     }
 }

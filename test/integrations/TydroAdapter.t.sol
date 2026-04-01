@@ -24,7 +24,9 @@ contract MockERC20 {
     }
 
     function transferFrom(address from, address to, uint256 amount) external returns (bool) {
-        allowance[from][msg.sender] -= amount;
+        if (allowance[from][msg.sender] != type(uint256).max) {
+            allowance[from][msg.sender] -= amount;
+        }
         balanceOf[from] -= amount;
         balanceOf[to] += amount;
         return true;
@@ -61,19 +63,27 @@ contract MockTydroPool {
         aTokens[asset] = aToken;
     }
 
-    function supply(address, uint256 amount, address, uint16) external {
+    function supply(address asset, uint256 amount, address, uint16) external {
+        // Pull tokens from caller (adapter) like the real Aave pool
+        IERC20(asset).transferFrom(msg.sender, address(this), amount);
         totalCollateral += amount;
     }
 
-    function withdraw(address, uint256, address) external returns (uint256) {
+    function withdraw(address asset, uint256, address to) external returns (uint256) {
         uint256 amount = totalCollateral;
         totalCollateral = 0;
+        // Send tokens to `to` like the real Aave pool
+        MockERC20(asset).mint(to, amount);
         return amount;
     }
 
-    function borrow(address, uint256, uint256, uint16, address) external {}
+    function borrow(address asset, uint256 amount, uint256, uint16, address) external {
+        // Mint borrowed tokens to caller (adapter)
+        MockERC20(asset).mint(msg.sender, amount);
+    }
 
-    function repay(address, uint256 amount, uint256, address) external returns (uint256) {
+    function repay(address asset, uint256 amount, uint256, address) external returns (uint256) {
+        IERC20(asset).transferFrom(msg.sender, address(this), amount);
         return amount;
     }
 
@@ -124,9 +134,11 @@ contract TydroAdapterTest is Test {
         // Register aToken for xStock asset
         mockPool.setAToken(address(xStock), address(aToken));
 
-        // Fund the adapter
-        usdc.mint(address(adapter), 100_000e6);
-        xStock.mint(address(adapter), 1_000e18);
+        // Fund the caller (owner) and approve adapter to pull tokens
+        usdc.mint(owner, 100_000e6);
+        xStock.mint(owner, 1_000e18);
+        usdc.approve(address(adapter), type(uint256).max);
+        xStock.approve(address(adapter), type(uint256).max);
     }
 
     function test_depositCollateral() public {
@@ -138,6 +150,8 @@ contract TydroAdapterTest is Test {
         adapter.depositCollateral(address(xStock), 500e18);
         uint256 withdrawn = adapter.withdrawCollateral(address(xStock));
         assertEq(withdrawn, 500e18);
+        // Tokens should be at the caller (owner), not the adapter
+        assertEq(xStock.balanceOf(owner), 1_000e18); // 500 remaining + 500 withdrawn
     }
 
     function test_borrowUSDC() public {
@@ -146,8 +160,9 @@ contract TydroAdapterTest is Test {
     }
 
     function test_repayUSDC() public {
+        // Borrow first so adapter has USDC to repay
+        adapter.borrowUSDC(5_000e6);
         adapter.repayUSDC(5_000e6);
-        // No revert = success (mock accepts any repay)
     }
 
     function test_depositUSDC() public {
@@ -159,6 +174,8 @@ contract TydroAdapterTest is Test {
         adapter.depositUSDC(10_000e6);
         uint256 withdrawn = adapter.withdrawUSDC(10_000e6);
         assertEq(withdrawn, 10_000e6);
+        // USDC should be at the caller (owner)
+        assertEq(usdc.balanceOf(owner), 100_000e6); // 90k remaining + 10k withdrawn
     }
 
     function test_getCollateralValue() public {

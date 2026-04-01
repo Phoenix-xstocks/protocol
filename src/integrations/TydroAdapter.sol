@@ -82,6 +82,7 @@ contract TydroAdapter is ITydroAdapter, Ownable, ReentrancyGuard {
 
     /// @inheritdoc ITydroAdapter
     function depositCollateral(address asset, uint256 amount) external onlyOwner nonReentrant {
+        IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
         IERC20(asset).forceApprove(address(tydroPool), amount);
         tydroPool.supply(asset, amount, address(this), 0);
         emit CollateralDeposited(asset, amount);
@@ -89,7 +90,7 @@ contract TydroAdapter is ITydroAdapter, Ownable, ReentrancyGuard {
 
     /// @inheritdoc ITydroAdapter
     function withdrawCollateral(address asset) external onlyOwner nonReentrant returns (uint256 amount) {
-        amount = tydroPool.withdraw(asset, type(uint256).max, address(this));
+        amount = tydroPool.withdraw(asset, type(uint256).max, msg.sender);
         emit CollateralWithdrawn(asset, amount);
     }
 
@@ -124,6 +125,7 @@ contract TydroAdapter is ITydroAdapter, Ownable, ReentrancyGuard {
 
     /// @inheritdoc ITydroAdapter
     function depositUSDC(uint256 amount) external onlyOwner nonReentrant {
+        usdc.safeTransferFrom(msg.sender, address(this), amount);
         usdc.forceApprove(address(tydroPool), amount);
         tydroPool.supply(address(usdc), amount, address(this), 0);
         emit USDCDeposited(amount);
@@ -131,7 +133,7 @@ contract TydroAdapter is ITydroAdapter, Ownable, ReentrancyGuard {
 
     /// @inheritdoc ITydroAdapter
     function withdrawUSDC(uint256 amount) external onlyOwner nonReentrant returns (uint256 withdrawn) {
-        withdrawn = tydroPool.withdraw(address(usdc), amount, address(this));
+        withdrawn = tydroPool.withdraw(address(usdc), amount, msg.sender);
         emit USDCWithdrawn(withdrawn);
     }
 

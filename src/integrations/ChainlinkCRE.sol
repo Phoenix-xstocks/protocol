@@ -2,14 +2,16 @@
 pragma solidity ^0.8.24;
 
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { ERC165 } from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 import { ICREConsumer, PricingResult } from "../interfaces/ICREConsumer.sol";
 import { IOptionPricer, PricingParams } from "../interfaces/IOptionPricer.sol";
+import { IReceiver } from "../pricing/CREConsumer.sol";
 
 /// @title ChainlinkCRE
-/// @notice CRE workflows consumer for pricing oracle. Receives fulfillment callbacks
-///         from the Chainlink CRE Router after DON consensus on Monte Carlo pricing.
-contract ChainlinkCRE is ICREConsumer, Ownable {
-    address public immutable creRouter;
+/// @notice Alternative CRE consumer implementation using custom errors.
+///         Implements IReceiver for CRE KeystoneForwarder compatibility.
+contract ChainlinkCRE is ICREConsumer, IReceiver, ERC165, Ownable {
+    address public forwarder;
     IOptionPricer public optionPricer;
 
     uint16 public constant MIN_PREMIUM = 300;
@@ -22,22 +24,40 @@ contract ChainlinkCRE is ICREConsumer, Ownable {
 
     event PricingRequested(bytes32 indexed noteId);
     event PricingAccepted(bytes32 indexed noteId, uint16 putPremiumBps, uint16 kiProbabilityBps);
+    event ForwarderUpdated(address indexed newForwarder);
 
-    error OnlyCRERouter();
+    error OnlyForwarder();
     error PremiumOutOfBounds(uint16 premium);
     error KIProbabilityTooHigh(uint16 kiProb);
     error PricingAlreadyFulfilled(bytes32 noteId);
     error PricingCrossCheckFailed(bytes32 noteId);
+    error NoteNotRegistered(bytes32 noteId);
 
-    constructor(address _creRouter, address _optionPricer, address _owner) Ownable(_owner) {
+    constructor(address _forwarder, address _optionPricer, address _owner) Ownable(_owner) {
         require(_optionPricer != address(0), "zero optionPricer");
-        creRouter = _creRouter;
+        require(_forwarder != address(0), "zero forwarder");
+        forwarder = _forwarder;
         optionPricer = IOptionPricer(_optionPricer);
     }
 
-    modifier onlyCRERouter() {
-        if (msg.sender != creRouter) revert OnlyCRERouter();
-        _;
+    // ---------------------------------------------------------------
+    // IReceiver implementation (called by KeystoneForwarder)
+    // ---------------------------------------------------------------
+
+    /// @notice Called by the CRE KeystoneForwarder after DON consensus.
+    function onReport(bytes calldata, bytes calldata report) external override {
+        if (msg.sender != forwarder) revert OnlyForwarder();
+
+        (bytes32 noteId, PricingResult memory result) = abi.decode(report, (bytes32, PricingResult));
+        _processPricing(noteId, result);
+    }
+
+    // ---------------------------------------------------------------
+    // ERC165
+    // ---------------------------------------------------------------
+
+    function supportsInterface(bytes4 interfaceId) public view override returns (bool) {
+        return interfaceId == type(IReceiver).interfaceId || super.supportsInterface(interfaceId);
     }
 
     /// @notice Submit pricing params before CRE fulfillment (for cross-check)
@@ -46,32 +66,11 @@ contract ChainlinkCRE is ICREConsumer, Ownable {
         emit PricingRequested(noteId);
     }
 
-    /// @inheritdoc ICREConsumer
-    function fulfillPricing(bytes32 noteId, PricingResult calldata result) external onlyCRERouter {
-        if (pricingFulfilled[noteId]) revert PricingAlreadyFulfilled(noteId);
-
-        if (result.putPremiumBps < MIN_PREMIUM || result.putPremiumBps > MAX_PREMIUM) {
-            revert PremiumOutOfBounds(result.putPremiumBps);
-        }
-        if (result.kiProbabilityBps > MAX_KI_PROB) {
-            revert KIProbabilityTooHigh(result.kiProbabilityBps);
-        }
-
-        // Cross-check with on-chain OptionPricer (spec 4.2)
-        PricingParams storage params = pricingParams[noteId];
-        if (params.basket.length > 0) {
-            (bool approved, ) = optionPricer.verifyPricing(
-                params,
-                result.putPremiumBps,
-                result.inputsHash
-            );
-            if (!approved) revert PricingCrossCheckFailed(noteId);
-        }
-
-        acceptedPricings[noteId] = result;
-        pricingFulfilled[noteId] = true;
-
-        emit PricingAccepted(noteId, result.putPremiumBps, result.kiProbabilityBps);
+    /// @notice Update the forwarder address.
+    function setForwarder(address _forwarder) external onlyOwner {
+        require(_forwarder != address(0), "zero forwarder");
+        forwarder = _forwarder;
+        emit ForwarderUpdated(_forwarder);
     }
 
     /// @inheritdoc ICREConsumer
@@ -82,5 +81,35 @@ contract ChainlinkCRE is ICREConsumer, Ownable {
     /// @notice Check if pricing has been fulfilled for a note.
     function isPricingFulfilled(bytes32 noteId) external view returns (bool) {
         return pricingFulfilled[noteId];
+    }
+
+    // ---------------------------------------------------------------
+    // Internal
+    // ---------------------------------------------------------------
+
+    function _processPricing(bytes32 noteId, PricingResult memory result) internal {
+        if (pricingFulfilled[noteId]) revert PricingAlreadyFulfilled(noteId);
+
+        PricingParams storage params = pricingParams[noteId];
+        if (params.basket.length == 0) revert NoteNotRegistered(noteId);
+
+        if (result.putPremiumBps < MIN_PREMIUM || result.putPremiumBps > MAX_PREMIUM) {
+            revert PremiumOutOfBounds(result.putPremiumBps);
+        }
+        if (result.kiProbabilityBps > MAX_KI_PROB) {
+            revert KIProbabilityTooHigh(result.kiProbabilityBps);
+        }
+
+        (bool approved, ) = optionPricer.verifyPricing(
+            params,
+            result.putPremiumBps,
+            result.inputsHash
+        );
+        if (!approved) revert PricingCrossCheckFailed(noteId);
+
+        acceptedPricings[noteId] = result;
+        pricingFulfilled[noteId] = true;
+
+        emit PricingAccepted(noteId, result.putPremiumBps, result.kiProbabilityBps);
     }
 }

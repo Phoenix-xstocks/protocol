@@ -10,7 +10,5 @@ struct PricingResult {
 }
 
 interface ICREConsumer {
-    function fulfillPricing(bytes32 noteId, PricingResult calldata result) external;
-
     function getAcceptedPricing(bytes32 noteId) external view returns (PricingResult memory);
 }

@@ -34,20 +34,21 @@ import { FeeCollector } from "../src/periphery/FeeCollector.sol";
 
 /// @title Deploy
 /// @notice Full protocol deployment to Ink Sepolia testnet.
-///         Uses mock addresses for external protocols (Nado, Tydro, 1inch, Sablier, Chainlink)
-///         until real testnet addresses are confirmed.
+///         Real addresses: Tydro xStocks pool, Chainlink CRE forwarder, Pyth.
+///         Mock/skip: Nado perps (not on Ink), 1inch (using TestnetSwap).
 contract Deploy is Script {
     // Ink Sepolia testnet token addresses
     address constant USDC = 0x6b57475467cd854d36Be7FB614caDa5207838943;
     address constant wQQQx = 0x267ED9BC43B16D832cB9Aaf0e3445f0cC9f536d9;
     address constant wSPYx = 0x9eF9f9B22d3CA9769e28e769e2AAA3C2B0072D0e;
 
-    // External protocol placeholders (to be updated with real addresses)
-    address constant MOCK_NADO_PERP = address(0x1001);
+    // External protocols
+    address constant MOCK_NADO_PERP = address(0x1001); // Nado not on Ink testnet — skipped via testnetMode
     address constant TYDRO_POOL = 0x6807dc923806fE8Fd134338EABCA509979a7e0cB; // Tydro Ink Sepolia xStocks
     address constant TESTNET_SWAP = 0x2fE68a36B08754c28Ca3334D863560A68EFe5a66; // TestnetSwap on Ink Sepolia
-    // Pyth on Ink Sepolia
-    address constant PYTH = 0x2880aB155794e7179c9eE2e38200202908C17B43;
+    address constant PYTH = 0x2880aB155794e7179c9eE2e38200202908C17B43; // Pyth on Ink Sepolia
+    // Chainlink CRE KeystoneForwarder on Ink Sepolia (production)
+    address constant CRE_FORWARDER = 0x76c9cf548b4179F8901cda1f8623568b58215E62;
 
     function run() external {
         uint256 deployerPk = vm.envUint("PRIVATE_KEY");
@@ -66,7 +67,7 @@ contract Deploy is Script {
         OptionPricer optionPricer = new OptionPricer(address(volOracle), deployer);
         console.log("OptionPricer:", address(optionPricer));
 
-        CREConsumer creConsumer = new CREConsumer(address(1), address(optionPricer), deployer);
+        CREConsumer creConsumer = new CREConsumer(CRE_FORWARDER, address(optionPricer), deployer);
         console.log("CREConsumer:", address(creConsumer));
 
         CouponCalculator couponCalculator = new CouponCalculator();
@@ -155,7 +156,7 @@ contract Deploy is Script {
 
         // HedgeManager: engine needs to call openHedge/closeHedge
         hedgeManager.setAuthorized(address(engine), true);
-        hedgeManager.setTestnetMode(true); // skip Nado perps on testnet
+        hedgeManager.setTestnetMode(true); // skip Nado perps only (Tydro collateral is live)
         engine.setTestnetMode(true); // skip CRE check in issuance gate
 
         // Transfer adapter ownership to HedgeManager (it calls them directly)

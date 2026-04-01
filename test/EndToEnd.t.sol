@@ -43,7 +43,6 @@ contract MockCREConsumer is ICREConsumer {
         accepted[noteId] = true;
     }
 
-    function fulfillPricing(bytes32, PricingResult calldata) external pure {}
     function getAcceptedPricing(bytes32 noteId) external view returns (PricingResult memory) {
         require(accepted[noteId], "pricing not accepted");
         return results[noteId];

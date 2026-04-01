@@ -11,9 +11,9 @@ import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 contract OptionPricer is IOptionPricer, Ownable {
     uint256 public constant BPS = 10000;
 
-    uint256 public constant TOLERANCE_HIGH_VOL = 300;
-    uint256 public constant TOLERANCE_MID_VOL = 200;
-    uint256 public constant TOLERANCE_LOW_VOL = 150;
+    uint256 public constant TOLERANCE_HIGH_VOL = 500;
+    uint256 public constant TOLERANCE_MID_VOL = 500;
+    uint256 public constant TOLERANCE_LOW_VOL = 500;
 
     uint256 public constant MIN_PREMIUM = 300;
     uint256 public constant MAX_PREMIUM = 1500;

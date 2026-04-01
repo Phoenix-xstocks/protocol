@@ -128,9 +128,11 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
             usdc.safeIncreaseAllowance(address(swapper), perStock);
             uint256 xStockAmount = swapper.swap(address(usdc), basket[i], perStock);
 
-            // 2. Deposit xStocks on Tydro as collateral
-            IERC20(basket[i]).safeIncreaseAllowance(address(tydro), xStockAmount);
-            tydro.depositCollateral(basket[i], xStockAmount);
+            // 2. Deposit xStocks on Tydro as collateral (skip if not supported in testnet)
+            if (!testnetMode) {
+                IERC20(basket[i]).safeIncreaseAllowance(address(tydro), xStockAmount);
+                tydro.depositCollateral(basket[i], xStockAmount);
+            }
 
             // 3. Short stock perps on Nado (skip in testnet mode)
             bytes32 positionId;
@@ -150,8 +152,11 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
             totalSpot += perStock;
         }
 
-        // 4. Borrow USDC from Tydro (margin for perps)
-        uint256 borrowed = tydro.borrowUSDC(notional / 2);
+        // 4. Borrow USDC from Tydro (margin for perps) — skip in testnet
+        uint256 borrowed;
+        if (!testnetMode) {
+            borrowed = tydro.borrowUSDC(notional / 2);
+        }
         pos.tydroBorrowed = borrowed;
         pos.spotNotional = totalSpot;
 
@@ -171,18 +176,30 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
             }
         }
 
-        // 2. Repay Tydro borrow
-        if (pos.tydroBorrowed > 0) {
-            usdc.safeIncreaseAllowance(address(tydro), pos.tydroBorrowed);
-            tydro.repayUSDC(pos.tydroBorrowed);
-        }
+        if (!testnetMode) {
+            // 2. Repay Tydro borrow
+            if (pos.tydroBorrowed > 0) {
+                usdc.safeIncreaseAllowance(address(tydro), pos.tydroBorrowed);
+                tydro.repayUSDC(pos.tydroBorrowed);
+            }
 
-        // 3. Withdraw xStocks from Tydro and sell via 1inch
-        for (uint256 i = 0; i < pos.stockCount; i++) {
-            StockHedge storage sh = pos.stocks[i];
-            uint256 xStockAmount = tydro.withdrawCollateral(sh.asset);
-            IERC20(sh.asset).safeIncreaseAllowance(address(swapper), xStockAmount);
-            recovered += swapper.swap(sh.asset, address(usdc), xStockAmount);
+            // 3. Withdraw xStocks from Tydro and sell
+            for (uint256 i = 0; i < pos.stockCount; i++) {
+                StockHedge storage sh = pos.stocks[i];
+                uint256 xStockAmount = tydro.withdrawCollateral(sh.asset);
+                IERC20(sh.asset).safeIncreaseAllowance(address(swapper), xStockAmount);
+                recovered += swapper.swap(sh.asset, address(usdc), xStockAmount);
+            }
+        } else {
+            // Testnet: sell xStocks directly (they're in this contract from the swap)
+            for (uint256 i = 0; i < pos.stockCount; i++) {
+                StockHedge storage sh = pos.stocks[i];
+                uint256 bal = IERC20(sh.asset).balanceOf(address(this));
+                if (bal > 0) {
+                    IERC20(sh.asset).safeIncreaseAllowance(address(swapper), bal);
+                    recovered += swapper.swap(sh.asset, address(usdc), bal);
+                }
+            }
         }
 
         int256 pnl = int256(recovered) - int256(pos.spotNotional);

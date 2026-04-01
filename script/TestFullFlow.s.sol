@@ -13,8 +13,8 @@ contract TestFullFlow is Script {
     address constant NVDAx  = 0x3EfB67e01d5Ab3dd37dBb34D8a8c09D0682Bfc4E;
     address constant TSLAx  = 0x2a968432b2BC26dA460A0B7262414552288C894E;
     address constant METAx  = 0x7EA9266A024e168341827a9c4621EC5b16cda65a;
-    address constant ENGINE  = 0x7A117e085A5871D122409701B4cFB2177AE66315;
-    address constant VAULT   = 0x6393ce64842303f15e1FD57f89e5A06150f86eC5;
+    address constant ENGINE  = 0x2Abb3C917aEaC67A9aa3f375A6D4F1Ca30B5735e;
+    address constant VAULT   = 0x194AaCC47fb0c89C467331478FcE9B529E8f6385;
 
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");

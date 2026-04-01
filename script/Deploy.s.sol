@@ -43,7 +43,7 @@ contract Deploy is Script {
 
     // External protocol placeholders (to be updated with real addresses)
     address constant MOCK_NADO_PERP = address(0x1001);
-    address constant MOCK_TYDRO_POOL = address(0x1002);
+    address constant TYDRO_POOL = 0x6807dc923806fE8Fd134338EABCA509979a7e0cB; // Tydro Ink Sepolia xStocks
     address constant MOCK_1INCH_ROUTER = address(0x1003);
     // Pyth on Ink Sepolia
     address constant PYTH = 0x2880aB155794e7179c9eE2e38200202908C17B43;
@@ -75,7 +75,7 @@ contract Deploy is Script {
         NadoAdapter nado = new NadoAdapter(MOCK_NADO_PERP, USDC, deployer);
         console.log("NadoAdapter:", address(nado));
 
-        TydroAdapter tydro = new TydroAdapter(MOCK_TYDRO_POOL, USDC, deployer);
+        TydroAdapter tydro = new TydroAdapter(TYDRO_POOL, USDC, deployer);
         console.log("TydroAdapter:", address(tydro));
 
         OneInchSwapper swapper = new OneInchSwapper(MOCK_1INCH_ROUTER, deployer);

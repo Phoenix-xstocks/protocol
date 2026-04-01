@@ -378,7 +378,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     // ----------------------------------------------------------------
 
     /// @inheritdoc IAutocallEngine
-    function settleKI(bytes32 noteId, bool preferPhysical) external override nonReentrant {
+    function settleKi(bytes32 noteId, bool preferPhysical) external override nonReentrant {
         Note storage note = _notes[noteId];
         _requireState(noteId, State.KISettle);
         if (msg.sender != note.holder) revert OnlyHolder();
@@ -403,7 +403,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
 
     /// @notice Admin force-settle KI if holder doesn't choose within deadline.
     ///         Defaults to cash settlement to protect the holder.
-    function forceSettleKI(bytes32 noteId) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
+    function forceSettleKi(bytes32 noteId) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
         Note storage note = _notes[noteId];
         _requireState(noteId, State.KISettle);
         require(
@@ -573,6 +573,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
             }
 
             // perf = currentPrice / initialPrice * BPS
+            // forge-lint: disable-next-line(unsafe-typecast)
             uint256 perf = (uint256(int256(currentPrice)) * BPS) / uint256(note.initialPrices[i]);
             if (perf < worst) {
                 worst = perf;
@@ -617,7 +618,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     }
 
     /// @notice Cancel all active Sablier streams for a note on settlement.
-    ///         Refunded USDC stays in SablierStream and can be recovered by admin.
+    ///         Refunded usdc stays in SablierStream and can be recovered by admin.
     function _cancelAllNoteStreams(bytes32 noteId) internal {
         if (address(sablierStream) != address(0)) {
             sablierStream.cancelAllNoteStreams(noteId);
@@ -643,11 +644,11 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         } else {
             // No KI -- settle at par + remaining coupons
             _transition(noteId, State.NoKISettle);
-            _settleNoKI(noteId, note);
+            _settleNoKi(noteId, note);
         }
     }
 
-    function _settleNoKI(bytes32 noteId, Note storage note) internal {
+    function _settleNoKi(bytes32 noteId, Note storage note) internal {
         _cancelAllNoteStreams(noteId);
 
         // Pay out any accumulated memory coupons before settling

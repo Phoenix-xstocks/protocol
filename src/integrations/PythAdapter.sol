@@ -91,14 +91,19 @@ contract PythAdapter is Ownable {
             normalized = int256(p.price);
         } else if (p.expo > targetExpo) {
             // expo=-5, target=-8 → need MORE decimals → multiply by 10^(expo - target) = 10^3
+            // forge-lint: disable-next-line(unsafe-typecast)
             uint256 diff = uint256(int256(p.expo - targetExpo));
+            // forge-lint: disable-next-line(unsafe-typecast)
             normalized = int256(p.price) * int256(10 ** diff);
         } else {
             // expo=-10, target=-8 → need FEWER decimals → divide by 10^(target - expo) = 10^2
+            // forge-lint: disable-next-line(unsafe-typecast)
             uint256 diff = uint256(int256(targetExpo - p.expo));
+            // forge-lint: disable-next-line(unsafe-typecast)
             normalized = int256(p.price) / int256(10 ** diff);
         }
 
+        // forge-lint: disable-next-line(unsafe-typecast)
         price = int192(normalized);
         timestamp = uint32(p.publishTime);
     }
@@ -117,13 +122,18 @@ contract PythAdapter is Ownable {
         if (p.expo == targetExpo) {
             normalized = int256(p.price);
         } else if (p.expo > targetExpo) {
+            // forge-lint: disable-next-line(unsafe-typecast)
             uint256 diff = uint256(int256(p.expo - targetExpo));
+            // forge-lint: disable-next-line(unsafe-typecast)
             normalized = int256(p.price) * int256(10 ** diff);
         } else {
+            // forge-lint: disable-next-line(unsafe-typecast)
             uint256 diff = uint256(int256(targetExpo - p.expo));
+            // forge-lint: disable-next-line(unsafe-typecast)
             normalized = int256(p.price) / int256(10 ** diff);
         }
 
+        // forge-lint: disable-next-line(unsafe-typecast)
         price = int192(normalized);
         timestamp = uint32(p.publishTime);
     }
@@ -134,7 +144,7 @@ contract PythAdapter is Ownable {
     }
 
     /// @notice Recover ETH sent to this contract
-    function recoverETH() external onlyOwner {
+    function recoverEth() external onlyOwner {
         (bool ok, ) = msg.sender.call{ value: address(this).balance }("");
         require(ok, "transfer failed");
     }

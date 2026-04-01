@@ -87,6 +87,7 @@ contract NadoAdapter is INadoAdapter, Ownable, ReentrancyGuard {
         positions[positionId].open = false;
 
         // Return absolute PnL; negative PnL returns 0 to caller (loss handled by margin)
+        // forge-lint: disable-next-line(unsafe-typecast)
         pnl = rawPnl > 0 ? uint256(rawPnl) : 0;
 
         emit ShortClosed(positionId, pnl);

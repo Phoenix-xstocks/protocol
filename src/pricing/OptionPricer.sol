@@ -43,7 +43,7 @@ contract OptionPricer is IOptionPricer, Ownable {
         uint256 worstOfMult = _sqrt(params.basket.length * 1e18);
         uint256 corrAdj = 1e18 - (avgCorr * 1e18 / (2 * BPS));
 
-        onChainApprox = (singlePut * worstOfMult / 1e9) * corrAdj / 1e18;
+        onChainApprox = (singlePut * worstOfMult * corrAdj) / (1e9 * 1e18);
         onChainApprox = (onChainApprox * BPS * 365) / (params.maturityDays * 1e18);
 
         uint256 tolerance = _getTolerance(avgVol);

@@ -65,7 +65,7 @@ contract CREConsumerTest is Test {
         return PricingResult({
             putPremiumBps: 800,
             kiProbabilityBps: 500,
-            expectedKILossBps: 200,
+            expectedKiLossBps: 200,
             vegaBps: 100,
             inputsHash: bytes32(uint256(0xABCD))
         });
@@ -265,7 +265,7 @@ contract CREConsumerTest is Test {
         PricingResult memory result = consumer.getAcceptedPricing(NOTE_1);
         assertEq(result.putPremiumBps, 800);
         assertEq(result.kiProbabilityBps, 500);
-        assertEq(result.expectedKILossBps, 200);
+        assertEq(result.expectedKiLossBps, 200);
         assertEq(result.vegaBps, 100);
         assertEq(result.inputsHash, bytes32(uint256(0xABCD)));
     }

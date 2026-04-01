@@ -154,25 +154,25 @@ contract TydroAdapterTest is Test {
         assertEq(xStock.balanceOf(owner), 1_000e18); // 500 remaining + 500 withdrawn
     }
 
-    function test_borrowUSDC() public {
-        uint256 borrowed = adapter.borrowUSDC(5_000e6);
+    function test_borrowUsdc() public {
+        uint256 borrowed = adapter.borrowUsdc(5_000e6);
         assertEq(borrowed, 5_000e6);
     }
 
-    function test_repayUSDC() public {
+    function test_repayUsdc() public {
         // Borrow first so adapter has USDC to repay
-        adapter.borrowUSDC(5_000e6);
-        adapter.repayUSDC(5_000e6);
+        adapter.borrowUsdc(5_000e6);
+        adapter.repayUsdc(5_000e6);
     }
 
-    function test_depositUSDC() public {
-        adapter.depositUSDC(10_000e6);
+    function test_depositUsdc() public {
+        adapter.depositUsdc(10_000e6);
         assertEq(mockPool.totalCollateral(), 10_000e6);
     }
 
-    function test_withdrawUSDC() public {
-        adapter.depositUSDC(10_000e6);
-        uint256 withdrawn = adapter.withdrawUSDC(10_000e6);
+    function test_withdrawUsdc() public {
+        adapter.depositUsdc(10_000e6);
+        uint256 withdrawn = adapter.withdrawUsdc(10_000e6);
         assertEq(withdrawn, 10_000e6);
         // USDC should be at the caller (owner)
         assertEq(usdc.balanceOf(owner), 100_000e6); // 90k remaining + 10k withdrawn
@@ -199,10 +199,10 @@ contract TydroAdapterTest is Test {
         adapter.depositCollateral(address(xStock), 500e18);
     }
 
-    function test_onlyOwner_borrowUSDC() public {
+    function test_onlyOwner_borrowUsdc() public {
         vm.prank(address(0xdead));
         vm.expectRevert();
-        adapter.borrowUSDC(5_000e6);
+        adapter.borrowUsdc(5_000e6);
     }
 
     function test_recoverToken() public {

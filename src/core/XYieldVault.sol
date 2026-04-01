@@ -25,7 +25,7 @@ contract XYieldVault is IXYieldVault, AccessControl, ReentrancyGuard {
     // ----------------------------------------------------------------
     // Constants
     // ----------------------------------------------------------------
-    uint256 public constant MIN_NOTE_SIZE = 100e6; // $100 in USDC (6 decimals)
+    uint256 public constant MIN_NOTE_SIZE = 100e6; // $100 in usdc (6 decimals)
     uint256 public constant MAX_NOTE_SIZE = 100_000e6; // $100k
     uint256 public constant MAX_TVL = 5_000_000e6; // $5M
     uint256 public constant MAX_ACTIVE_NOTES = 500;
@@ -193,7 +193,7 @@ contract XYieldVault is IXYieldVault, AccessControl, ReentrancyGuard {
         // Mint NoteToken for net amount (what the engine actually receives)
         noteToken.mint(req.receiver, req.noteId, netAmount);
 
-        // Transfer net USDC to engine for coupon payments and settlement
+        // Transfer net usdc to engine for coupon payments and settlement
         usdc.safeTransfer(address(engine), netAmount);
 
         _totalAssets += req.amount;
@@ -228,7 +228,7 @@ contract XYieldVault is IXYieldVault, AccessControl, ReentrancyGuard {
     /// @inheritdoc IXYieldVault
     function requestRedeem(uint256 /* noteTokenId */ ) external pure override returns (uint256) {
         // Redemption is handled through the AutocallEngine settlement flow
-        revert("Redeem via AutocallEngine.settleKI");
+        revert("Redeem via AutocallEngine.settleKi");
     }
 
     /// @inheritdoc IXYieldVault

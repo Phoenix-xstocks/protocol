@@ -6,7 +6,7 @@ import { PricingParams } from "./IOptionPricer.sol";
 struct PricingResult {
     uint16 putPremiumBps;
     uint16 kiProbabilityBps;
-    uint16 expectedKILossBps;
+    uint16 expectedKiLossBps;
     uint16 vegaBps;
     bytes32 inputsHash;
 }

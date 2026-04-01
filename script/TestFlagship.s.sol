@@ -5,11 +5,7 @@ import { Script, console } from "forge-std/Script.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { AutocallEngine } from "../src/core/AutocallEngine.sol";
 import { XYieldVault } from "../src/core/XYieldVault.sol";
-import { NoteToken } from "../src/core/NoteToken.sol";
-import { CREConsumer } from "../src/pricing/CREConsumer.sol";
-import { VolOracle } from "../src/pricing/VolOracle.sol";
 import { State } from "../src/interfaces/IAutocallEngine.sol";
-import { PricingResult } from "../src/interfaces/ICREConsumer.sol";
 
 /// @title TestFlagship
 /// @notice Full on-chain E2E test: deposit → create → price → activate → verify
@@ -17,9 +13,8 @@ import { PricingResult } from "../src/interfaces/ICREConsumer.sol";
 contract TestFlagship is Script {
     // Tokens
     address constant USDC   = 0x6b57475467cd854d36Be7FB614caDa5207838943;
-    address constant NVDAx  = 0x3EfB67e01d5Ab3dd37dBb34D8a8c09D0682Bfc4E;
-    address constant TSLAx  = 0x2a968432b2BC26dA460A0B7262414552288C894E;
-    address constant METAx  = 0x7EA9266A024e168341827a9c4621EC5b16cda65a;
+    address constant WQQQX  = 0x267ED9BC43B16D832cB9Aaf0e3445f0cC9f536d9;
+    address constant WSPYX  = 0x9eF9f9B22d3CA9769e28e769e2AAA3C2B0072D0e;
 
     // Latest deploy
     address constant ENGINE  = 0x65cBd62cF76b4B2fE19d0e199A06550f74d5bB4e;
@@ -53,11 +48,10 @@ contract TestFlagship is Script {
         // Step 2: Create note with flagship basket
         // ============================================
         console.log("");
-        console.log("--- Step 2: Create Note (NVDAx + TSLAx + METAx) ---");
-        address[] memory basket = new address[](3);
-        basket[0] = NVDAx;
-        basket[1] = TSLAx;
-        basket[2] = METAx;
+        console.log("--- Step 2: Create Note (WQQQX + WSPYX) ---");
+        address[] memory basket = new address[](2);
+        basket[0] = WQQQX;
+        basket[1] = WSPYX;
 
         bytes32 noteId = engine.createNote(basket, 5000e6, deployer);
         console.log("Note ID:");
@@ -96,7 +90,7 @@ contract TestFlagship is Script {
 
         console.log("");
         console.log("=== FLAGSHIP E2E TEST PASSED ===");
-        console.log("Basket: NVDAx + TSLAx + METAx");
+        console.log("Basket: WQQQX + WSPYX");
         console.log("Notional: 5000 USDC");
         console.log("Next step: priceNote (requires CRE pricing or mock)");
     }

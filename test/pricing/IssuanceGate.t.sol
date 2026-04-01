@@ -68,7 +68,7 @@ contract IssuanceGateTest is Test {
         PricingResult memory result = PricingResult({
             putPremiumBps: 920,
             kiProbabilityBps: 800,
-            expectedKILossBps: 400,
+            expectedKiLossBps: 400,
             vegaBps: 150,
             inputsHash: bytes32(0)
         });

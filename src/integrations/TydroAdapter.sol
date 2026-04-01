@@ -95,14 +95,14 @@ contract TydroAdapter is ITydroAdapter, Ownable, ReentrancyGuard {
     }
 
     /// @inheritdoc ITydroAdapter
-    function borrowUSDC(uint256 amount) external onlyOwner nonReentrant returns (uint256 borrowed) {
+    function borrowUsdc(uint256 amount) external onlyOwner nonReentrant returns (uint256 borrowed) {
         tydroPool.borrow(address(usdc), amount, VARIABLE_RATE_MODE, 0, address(this));
         borrowed = amount;
         emit USDCBorrowed(amount);
     }
 
     /// @inheritdoc ITydroAdapter
-    function repayUSDC(uint256 amount) external onlyOwner nonReentrant {
+    function repayUsdc(uint256 amount) external onlyOwner nonReentrant {
         usdc.forceApprove(address(tydroPool), amount);
         tydroPool.repay(address(usdc), amount, VARIABLE_RATE_MODE, address(this));
         emit USDCRepaid(amount);
@@ -124,7 +124,7 @@ contract TydroAdapter is ITydroAdapter, Ownable, ReentrancyGuard {
     }
 
     /// @inheritdoc ITydroAdapter
-    function depositUSDC(uint256 amount) external onlyOwner nonReentrant {
+    function depositUsdc(uint256 amount) external onlyOwner nonReentrant {
         usdc.safeTransferFrom(msg.sender, address(this), amount);
         usdc.forceApprove(address(tydroPool), amount);
         tydroPool.supply(address(usdc), amount, address(this), 0);
@@ -132,7 +132,7 @@ contract TydroAdapter is ITydroAdapter, Ownable, ReentrancyGuard {
     }
 
     /// @inheritdoc ITydroAdapter
-    function withdrawUSDC(uint256 amount) external onlyOwner nonReentrant returns (uint256 withdrawn) {
+    function withdrawUsdc(uint256 amount) external onlyOwner nonReentrant returns (uint256 withdrawn) {
         withdrawn = tydroPool.withdraw(address(usdc), amount, msg.sender);
         emit USDCWithdrawn(withdrawn);
     }

@@ -90,8 +90,12 @@ contract IssuanceGate is IIssuanceGate, Ownable {
     }
 
     modifier onlyAuthorizedOrOwner() {
-        require(msg.sender == owner() || authorized[msg.sender], "not authorized");
+        _onlyAuthorizedOrOwner();
         _;
+    }
+
+    function _onlyAuthorizedOrOwner() internal view {
+        require(msg.sender == owner() || authorized[msg.sender], "not authorized");
     }
 
     function noteActivated(uint256 notional) external onlyAuthorizedOrOwner {

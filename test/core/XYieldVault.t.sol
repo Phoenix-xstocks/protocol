@@ -35,7 +35,7 @@ contract MockAutocallEngine is IAutocallEngine {
     }
 
     function observe(bytes32) external {}
-    function settleKI(bytes32, bool) external {}
+    function settleKi(bytes32, bool) external {}
 
     function getState(bytes32 noteId) external view returns (State) {
         return states[noteId];

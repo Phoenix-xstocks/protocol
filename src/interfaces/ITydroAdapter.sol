@@ -6,15 +6,15 @@ interface ITydroAdapter {
 
     function withdrawCollateral(address asset) external returns (uint256 amount);
 
-    function borrowUSDC(uint256 amount) external returns (uint256 borrowed);
+    function borrowUsdc(uint256 amount) external returns (uint256 borrowed);
 
-    function repayUSDC(uint256 amount) external;
+    function repayUsdc(uint256 amount) external;
 
     function getCollateralValue(address asset) external view returns (uint256);
 
     function getLendingRate() external view returns (uint256 ratePerSecond);
 
-    function depositUSDC(uint256 amount) external;
+    function depositUsdc(uint256 amount) external;
 
-    function withdrawUSDC(uint256 amount) external returns (uint256 withdrawn);
+    function withdrawUsdc(uint256 amount) external returns (uint256 withdrawn);
 }

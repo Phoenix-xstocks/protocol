@@ -12,8 +12,8 @@ import { State } from "../src/interfaces/IAutocallEngine.sol";
 ///         Run: forge script script/TestOnChain.s.sol --rpc-url $RPC --broadcast
 contract TestOnChain is Script {
     address constant USDC = 0x6b57475467cd854d36Be7FB614caDa5207838943;
-    address constant wQQQx = 0x267ED9BC43B16D832cB9Aaf0e3445f0cC9f536d9;
-    address constant wSPYx = 0x9eF9f9B22d3CA9769e28e769e2AAA3C2B0072D0e;
+    address constant WQQQX = 0x267ED9BC43B16D832cB9Aaf0e3445f0cC9f536d9;
+    address constant WSPYX = 0x9eF9f9B22d3CA9769e28e769e2AAA3C2B0072D0e;
 
     // Latest deploy addresses
     address constant ENGINE = 0xB6a9BE9f9BD4C690539f4Df671184efce3fc22C2;
@@ -44,8 +44,8 @@ contract TestOnChain is Script {
 
         // 2. Create note with real basket
         address[] memory basket = new address[](2);
-        basket[0] = wQQQx;
-        basket[1] = wSPYx;
+        basket[0] = WQQQX;
+        basket[1] = WSPYX;
         bytes32 noteId = engine.createNote(basket, 1000e6, deployer);
         console.log("Note created, ID:");
         console.logBytes32(noteId);

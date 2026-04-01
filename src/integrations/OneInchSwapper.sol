@@ -19,7 +19,7 @@ interface IAggregationRouter {
 contract OneInchSwapper is IOneInchSwapper, Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    IAggregationRouter public immutable ROUTER;
+    IAggregationRouter public immutable router;
 
     /// @dev Maximum number of retry attempts per swap.
     uint256 public constant MAX_RETRIES = 3;
@@ -36,7 +36,7 @@ contract OneInchSwapper is IOneInchSwapper, Ownable, ReentrancyGuard {
     error InsufficientOutput(uint256 amountOut, uint256 minAmountOut);
 
     constructor(address _router, address _owner) Ownable(_owner) {
-        ROUTER = IAggregationRouter(_router);
+        router = IAggregationRouter(_router);
     }
 
     /// @inheritdoc IOneInchSwapper
@@ -65,7 +65,7 @@ contract OneInchSwapper is IOneInchSwapper, Ownable, ReentrancyGuard {
         internal
         returns (uint256 amountOut)
     {
-        IERC20(tokenIn).forceApprove(address(ROUTER), amountIn);
+        IERC20(tokenIn).forceApprove(address(router), amountIn);
 
         for (uint256 i = 0; i < MAX_RETRIES; i++) {
             uint256 currentSlippageBps = DEFAULT_SLIPPAGE_BPS + (i * RETRY_SLIPPAGE_INCREMENT_BPS);
@@ -77,11 +77,11 @@ contract OneInchSwapper is IOneInchSwapper, Ownable, ReentrancyGuard {
                 emit SwapRetried(i + 1, currentSlippageBps);
             }
 
-            try ROUTER.swap(tokenIn, tokenOut, amountIn, effectiveMin) returns (uint256 result) {
+            try router.swap(tokenIn, tokenOut, amountIn, effectiveMin) returns (uint256 result) {
                 if (minAmountOut > 0 && result < minAmountOut) {
                     revert InsufficientOutput(result, minAmountOut);
                 }
-                IERC20(tokenIn).forceApprove(address(ROUTER), 0);
+                IERC20(tokenIn).forceApprove(address(router), 0);
                 emit SwapExecuted(tokenIn, tokenOut, amountIn, result);
                 return result;
             } catch {
@@ -89,7 +89,7 @@ contract OneInchSwapper is IOneInchSwapper, Ownable, ReentrancyGuard {
             }
         }
 
-        IERC20(tokenIn).forceApprove(address(ROUTER), 0);
+        IERC20(tokenIn).forceApprove(address(router), 0);
         revert SwapFailed(MAX_RETRIES);
     }
 

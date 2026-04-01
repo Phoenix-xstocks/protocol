@@ -61,8 +61,8 @@ interface ITydroPool {
 contract TydroAdapter is ITydroAdapter, Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    ITydroPool public immutable TYDRO_POOL;
-    IERC20 public immutable USDC;
+    ITydroPool public immutable tydroPool;
+    IERC20 public immutable usdc;
 
     uint256 private constant VARIABLE_RATE_MODE = 2;
     uint256 private constant SECONDS_PER_YEAR = 365 days;
@@ -76,64 +76,64 @@ contract TydroAdapter is ITydroAdapter, Ownable, ReentrancyGuard {
     event USDCWithdrawn(uint256 amount);
 
     constructor(address _tydroPool, address _usdc, address _owner) Ownable(_owner) {
-        TYDRO_POOL = ITydroPool(_tydroPool);
-        USDC = IERC20(_usdc);
+        tydroPool = ITydroPool(_tydroPool);
+        usdc = IERC20(_usdc);
     }
 
     /// @inheritdoc ITydroAdapter
     function depositCollateral(address asset, uint256 amount) external onlyOwner nonReentrant {
         IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
-        IERC20(asset).forceApprove(address(TYDRO_POOL), amount);
-        TYDRO_POOL.supply(asset, amount, address(this), 0);
+        IERC20(asset).forceApprove(address(tydroPool), amount);
+        tydroPool.supply(asset, amount, address(this), 0);
         emit CollateralDeposited(asset, amount);
     }
 
     /// @inheritdoc ITydroAdapter
     function withdrawCollateral(address asset) external onlyOwner nonReentrant returns (uint256 amount) {
-        amount = TYDRO_POOL.withdraw(asset, type(uint256).max, msg.sender);
+        amount = tydroPool.withdraw(asset, type(uint256).max, msg.sender);
         emit CollateralWithdrawn(asset, amount);
     }
 
     /// @inheritdoc ITydroAdapter
     function borrowUsdc(uint256 amount) external onlyOwner nonReentrant returns (uint256 borrowed) {
-        TYDRO_POOL.borrow(address(USDC), amount, VARIABLE_RATE_MODE, 0, address(this));
+        tydroPool.borrow(address(usdc), amount, VARIABLE_RATE_MODE, 0, address(this));
         borrowed = amount;
         emit USDCBorrowed(amount);
     }
 
     /// @inheritdoc ITydroAdapter
     function repayUsdc(uint256 amount) external onlyOwner nonReentrant {
-        USDC.forceApprove(address(TYDRO_POOL), amount);
-        TYDRO_POOL.repay(address(USDC), amount, VARIABLE_RATE_MODE, address(this));
+        usdc.forceApprove(address(tydroPool), amount);
+        tydroPool.repay(address(usdc), amount, VARIABLE_RATE_MODE, address(this));
         emit USDCRepaid(amount);
     }
 
     /// @inheritdoc ITydroAdapter
     /// @notice Returns per-asset collateral value using the aToken balance
     function getCollateralValue(address asset) external view returns (uint256) {
-        (,,,,,,, , address aTokenAddress,,,,,,) = TYDRO_POOL.getReserveData(asset);
+        (,,,,,,, , address aTokenAddress,,,,,,) = tydroPool.getReserveData(asset);
         return IAToken(aTokenAddress).balanceOf(address(this));
     }
 
     /// @inheritdoc ITydroAdapter
     /// @notice Aave returns liquidity rate as a ray (1e27). Convert to wad (1e18) per-second.
     function getLendingRate() external view returns (uint256 ratePerSecond) {
-        uint128 currentLiquidityRate = TYDRO_POOL.getCurrentLiquidityRate(address(USDC));
+        uint128 currentLiquidityRate = tydroPool.getCurrentLiquidityRate(address(usdc));
         // Multiply by 1e18 first to avoid truncation, then divide by RAY and seconds
         ratePerSecond = (uint256(currentLiquidityRate) * 1e18) / RAY / SECONDS_PER_YEAR;
     }
 
     /// @inheritdoc ITydroAdapter
     function depositUsdc(uint256 amount) external onlyOwner nonReentrant {
-        USDC.safeTransferFrom(msg.sender, address(this), amount);
-        USDC.forceApprove(address(TYDRO_POOL), amount);
-        TYDRO_POOL.supply(address(USDC), amount, address(this), 0);
+        usdc.safeTransferFrom(msg.sender, address(this), amount);
+        usdc.forceApprove(address(tydroPool), amount);
+        tydroPool.supply(address(usdc), amount, address(this), 0);
         emit USDCDeposited(amount);
     }
 
     /// @inheritdoc ITydroAdapter
     function withdrawUsdc(uint256 amount) external onlyOwner nonReentrant returns (uint256 withdrawn) {
-        withdrawn = TYDRO_POOL.withdraw(address(USDC), amount, msg.sender);
+        withdrawn = tydroPool.withdraw(address(usdc), amount, msg.sender);
         emit USDCWithdrawn(withdrawn);
     }
 

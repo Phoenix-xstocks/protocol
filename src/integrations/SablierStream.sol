@@ -35,7 +35,7 @@ contract CouponStreamer is ISablierStream, Ownable, ReentrancyGuard {
     // Storage
     // ----------------------------------------------------------------
 
-    IERC20 public immutable USDC;
+    IERC20 public immutable usdc;
 
     uint256 public nextStreamId;
     mapping(uint256 => Stream) public streams;
@@ -67,7 +67,7 @@ contract CouponStreamer is ISablierStream, Ownable, ReentrancyGuard {
     // ----------------------------------------------------------------
 
     constructor(address _usdc, address _owner) Ownable(_owner) {
-        USDC = IERC20(_usdc);
+        usdc = IERC20(_usdc);
         nextStreamId = 1; // stream IDs start at 1 (0 = invalid)
     }
 
@@ -89,7 +89,7 @@ contract CouponStreamer is ISablierStream, Ownable, ReentrancyGuard {
         if (_noteStreamIds[noteId].length >= MAX_STREAMS_PER_NOTE) revert TooManyStreams(noteId);
 
         // Pull USDC from caller (AutocallEngine)
-        USDC.safeTransferFrom(msg.sender, address(this), monthlyAmount);
+        usdc.safeTransferFrom(msg.sender, address(this), monthlyAmount);
 
         streamId = nextStreamId++;
 
@@ -127,7 +127,7 @@ contract CouponStreamer is ISablierStream, Ownable, ReentrancyGuard {
         uint256 refunded = uint256(s.deposit) - owed;
 
         if (refunded > 0) {
-            USDC.safeTransfer(msg.sender, refunded);
+            usdc.safeTransfer(msg.sender, refunded);
         }
 
         emit CouponStreamCancelled(noteId, streamId, refunded);
@@ -151,7 +151,7 @@ contract CouponStreamer is ISablierStream, Ownable, ReentrancyGuard {
         }
 
         if (totalRefunded > 0) {
-            USDC.safeTransfer(msg.sender, totalRefunded);
+            usdc.safeTransfer(msg.sender, totalRefunded);
         }
     }
 
@@ -170,7 +170,7 @@ contract CouponStreamer is ISablierStream, Ownable, ReentrancyGuard {
 
         // forge-lint: disable-next-line(unsafe-typecast)
         s.withdrawn += uint128(withdrawable);
-        USDC.safeTransfer(msg.sender, withdrawable);
+        usdc.safeTransfer(msg.sender, withdrawable);
 
         emit CouponWithdrawn(streamId, msg.sender, withdrawable);
     }

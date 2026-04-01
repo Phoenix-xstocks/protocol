@@ -12,7 +12,7 @@ interface IVerifierProxy {
 /// @notice On-chain price verification using Chainlink Data Streams v10.
 ///         Verifies signed price reports and caches latest prices per feed.
 contract ChainlinkPriceFeed is Ownable {
-    IVerifierProxy public immutable VERIFIER_PROXY;
+    IVerifierProxy public immutable verifierProxy;
 
     struct PriceData {
         int192 price;
@@ -32,7 +32,7 @@ contract ChainlinkPriceFeed is Ownable {
     uint32 public constant MAX_STALENESS = 3600;
 
     constructor(address _verifierProxy, address _owner) Ownable(_owner) {
-        VERIFIER_PROXY = IVerifierProxy(_verifierProxy);
+        verifierProxy = IVerifierProxy(_verifierProxy);
     }
 
     /// @notice Verify a signed Chainlink Data Streams report and cache the price.
@@ -40,7 +40,7 @@ contract ChainlinkPriceFeed is Ownable {
         external
         returns (bytes32 feedId, int192 price, uint32 timestamp)
     {
-        bytes memory verifiedData = VERIFIER_PROXY.verify(signedReport);
+        bytes memory verifiedData = verifierProxy.verify(signedReport);
 
         // Data Streams v10 report: feedId, validFromTimestamp, observationsTimestamp,
         // nativeFee, linkFee, expiresAt, price, bid, ask

@@ -29,7 +29,7 @@ contract TestFullFlow is Script {
         vm.startBroadcast(pk);
 
         // 0. Setup VolOracle
-        VolOracle vol = VolOracle(address(engine.VOL_ORACLE()));
+        VolOracle vol = VolOracle(address(engine.volOracle()));
         address[] memory assets = new address[](2);
         assets[0] = WQQQX; assets[1] = WSPYX;
         uint256[] memory vols = new uint256[](2);

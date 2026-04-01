@@ -25,7 +25,7 @@ contract XYieldVault is IXYieldVault, AccessControl, ReentrancyGuard {
     // ----------------------------------------------------------------
     // Constants
     // ----------------------------------------------------------------
-    uint256 public constant MIN_NOTE_SIZE = 100e6; // $100 in USDC (6 decimals)
+    uint256 public constant MIN_NOTE_SIZE = 100e6; // $100 in usdc (6 decimals)
     uint256 public constant MAX_NOTE_SIZE = 100_000e6; // $100k
     uint256 public constant MAX_TVL = 5_000_000e6; // $5M
     uint256 public constant MAX_ACTIVE_NOTES = 500;
@@ -56,9 +56,9 @@ contract XYieldVault is IXYieldVault, AccessControl, ReentrancyGuard {
     // ----------------------------------------------------------------
     // Storage
     // ----------------------------------------------------------------
-    IERC20 public immutable USDC;
-    IAutocallEngine public immutable ENGINE;
-    NoteToken public immutable NOTE_TOKEN;
+    IERC20 public immutable usdc;
+    IAutocallEngine public immutable engine;
+    NoteToken public immutable noteToken;
     IFeeCollector public feeCollector;
 
     mapping(uint256 => DepositRequest) public requests;
@@ -92,9 +92,9 @@ contract XYieldVault is IXYieldVault, AccessControl, ReentrancyGuard {
     // ----------------------------------------------------------------
     constructor(address admin, address _usdc, address _engine, address _noteToken) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
-        USDC = IERC20(_usdc);
-        ENGINE = IAutocallEngine(_engine);
-        NOTE_TOKEN = NoteToken(_noteToken);
+        usdc = IERC20(_usdc);
+        engine = IAutocallEngine(_engine);
+        noteToken = NoteToken(_noteToken);
     }
 
     /// @notice Set the fee collector. Admin only.
@@ -136,7 +136,7 @@ contract XYieldVault is IXYieldVault, AccessControl, ReentrancyGuard {
         if (_totalAssets + amount > MAX_TVL) revert TVLExceeded();
         if (activeNoteCount >= MAX_ACTIVE_NOTES) revert MaxNotesExceeded();
 
-        USDC.safeTransferFrom(msg.sender, address(this), amount);
+        usdc.safeTransferFrom(msg.sender, address(this), amount);
 
         requestId = nextRequestId++;
         DepositRequest storage req = requests[requestId];
@@ -185,16 +185,16 @@ contract XYieldVault is IXYieldVault, AccessControl, ReentrancyGuard {
             uint256 originationFee = (req.amount * 10) / 10000; // 0.1%
             uint256 totalFees = embeddedFee + originationFee;
             if (totalFees > 0) {
-                USDC.safeTransfer(feeCollector.treasury(), totalFees);
+                usdc.safeTransfer(feeCollector.treasury(), totalFees);
                 netAmount -= totalFees;
             }
         }
 
         // Mint NoteToken for net amount (what the engine actually receives)
-        NOTE_TOKEN.mint(req.receiver, req.noteId, netAmount);
+        noteToken.mint(req.receiver, req.noteId, netAmount);
 
-        // Transfer net USDC to engine for coupon payments and settlement
-        USDC.safeTransfer(address(ENGINE), netAmount);
+        // Transfer net usdc to engine for coupon payments and settlement
+        usdc.safeTransfer(address(engine), netAmount);
 
         _totalAssets += req.amount;
         activeNoteCount++;
@@ -216,7 +216,7 @@ contract XYieldVault is IXYieldVault, AccessControl, ReentrancyGuard {
         }
 
         req.status = RequestStatus.Refunded;
-        USDC.safeTransfer(req.depositor, req.amount);
+        usdc.safeTransfer(req.depositor, req.amount);
 
         emit DepositRefunded(requestId, req.depositor, req.amount);
     }

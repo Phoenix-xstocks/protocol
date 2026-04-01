@@ -69,6 +69,10 @@ contract MockTydroPool {
         totalCollateral += amount;
     }
 
+    function setUserUseReserveAsCollateral(address, bool) external {
+        // no-op in mock
+    }
+
     function withdraw(address asset, uint256, address to) external returns (uint256) {
         uint256 amount = totalCollateral;
         totalCollateral = 0;

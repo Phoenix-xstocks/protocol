@@ -31,8 +31,8 @@ interface IEulerVault {
 contract EulerAdapter is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    IEulerVault public immutable eulerVault;
-    IERC20 public immutable usdc;
+    IEulerVault public immutable EULER_VAULT;
+    IERC20 public immutable USDC;
 
     event Deposited(uint256 assets, uint256 shares);
     event Withdrawn(uint256 assets, uint256 shares);
@@ -43,20 +43,20 @@ contract EulerAdapter is Ownable, ReentrancyGuard {
     constructor(address _eulerVault, address _usdc, address _owner) Ownable(_owner) {
         require(_eulerVault != address(0), "zero vault");
         require(_usdc != address(0), "zero usdc");
-        eulerVault = IEulerVault(_eulerVault);
-        usdc = IERC20(_usdc);
+        EULER_VAULT = IEulerVault(_eulerVault);
+        USDC = IERC20(_usdc);
 
         // Verify the Euler vault's underlying asset is USDC
-        if (eulerVault.asset() != _usdc) revert VaultAssetMismatch();
+        if (EULER_VAULT.asset() != _usdc) revert VaultAssetMismatch();
     }
 
     /// @notice Deposit USDC into Euler vault to earn yield
     /// @param amount USDC amount to deposit
     /// @return shares Euler vault shares received
     function deposit(uint256 amount) external onlyOwner nonReentrant returns (uint256 shares) {
-        usdc.safeTransferFrom(msg.sender, address(this), amount);
-        usdc.safeIncreaseAllowance(address(eulerVault), amount);
-        shares = eulerVault.deposit(amount, address(this));
+        USDC.safeTransferFrom(msg.sender, address(this), amount);
+        USDC.safeIncreaseAllowance(address(EULER_VAULT), amount);
+        shares = EULER_VAULT.deposit(amount, address(this));
         emit Deposited(amount, shares);
     }
 
@@ -64,34 +64,34 @@ contract EulerAdapter is Ownable, ReentrancyGuard {
     /// @param amount USDC amount to withdraw
     /// @return shares Euler shares burned
     function withdraw(uint256 amount) external onlyOwner nonReentrant returns (uint256 shares) {
-        shares = eulerVault.withdraw(amount, msg.sender, address(this));
+        shares = EULER_VAULT.withdraw(amount, msg.sender, address(this));
         emit Withdrawn(amount, shares);
     }
 
     /// @notice Withdraw all USDC from Euler vault
     /// @return assets Total USDC withdrawn
     function withdrawAll() external onlyOwner nonReentrant returns (uint256 assets) {
-        uint256 shares = eulerVault.balanceOf(address(this));
+        uint256 shares = EULER_VAULT.balanceOf(address(this));
         if (shares == 0) return 0;
-        assets = eulerVault.redeem(shares, msg.sender, address(this));
+        assets = EULER_VAULT.redeem(shares, msg.sender, address(this));
         emit Withdrawn(assets, shares);
     }
 
     /// @notice Get current USDC value of deposits in Euler (including yield)
     function getTotalValue() external view returns (uint256) {
-        uint256 shares = eulerVault.balanceOf(address(this));
-        return eulerVault.convertToAssets(shares);
+        uint256 shares = EULER_VAULT.balanceOf(address(this));
+        return EULER_VAULT.convertToAssets(shares);
     }
 
     /// @notice Get the yield earned (value above principal)
     function getAccruedYield(uint256 principal) external view returns (uint256) {
-        uint256 totalValue = eulerVault.convertToAssets(eulerVault.balanceOf(address(this)));
+        uint256 totalValue = EULER_VAULT.convertToAssets(EULER_VAULT.balanceOf(address(this)));
         return totalValue > principal ? totalValue - principal : 0;
     }
 
     /// @notice Get Euler vault shares balance
     function getShares() external view returns (uint256) {
-        return eulerVault.balanceOf(address(this));
+        return EULER_VAULT.balanceOf(address(this));
     }
 
     /// @notice Recover tokens sent to this contract by mistake

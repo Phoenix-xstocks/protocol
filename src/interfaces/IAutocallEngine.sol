@@ -25,7 +25,7 @@ interface IAutocallEngine {
 
     function observe(bytes32 noteId) external;
 
-    function settleKI(bytes32 noteId, bool preferPhysical) external;
+    function settleKi(bytes32 noteId, bool preferPhysical) external;
 
     function getState(bytes32 noteId) external view returns (State);
 

@@ -103,12 +103,12 @@ contract MockTydro is ITydroAdapter {
         IERC20(asset).transfer(msg.sender, amount);
     }
 
-    function borrowUSDC(uint256 amount) external override returns (uint256 borrowed) {
+    function borrowUsdc(uint256 amount) external override returns (uint256 borrowed) {
         totalBorrowed += amount;
         return amount;
     }
 
-    function repayUSDC(uint256 amount) external override {
+    function repayUsdc(uint256 amount) external override {
         totalBorrowed -= amount;
     }
 
@@ -121,9 +121,9 @@ contract MockTydro is ITydroAdapter {
         return 1585489599; // ~5% APY
     }
 
-    function depositUSDC(uint256) external override {}
+    function depositUsdc(uint256) external override {}
 
-    function withdrawUSDC(uint256 amount) external pure override returns (uint256) {
+    function withdrawUsdc(uint256 amount) external pure override returns (uint256) {
         return amount;
     }
 

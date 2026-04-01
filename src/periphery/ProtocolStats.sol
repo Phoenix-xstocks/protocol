@@ -10,10 +10,10 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// @notice Read-only aggregator for protocol-wide dashboard metrics.
 ///         All view functions — no state changes, no gas cost.
 contract ProtocolStats {
-    IAutocallEngine public immutable engine;
-    IXYieldVault public immutable vault;
-    IReserveFund public immutable reserveFund;
-    IERC20 public immutable usdc;
+    IAutocallEngine public immutable ENGINE;
+    IXYieldVault public immutable VAULT;
+    IReserveFund public immutable RESERVE_FUND;
+    IERC20 public immutable USDC;
 
     constructor(
         address _engine,
@@ -21,10 +21,10 @@ contract ProtocolStats {
         address _reserveFund,
         address _usdc
     ) {
-        engine = IAutocallEngine(_engine);
-        vault = IXYieldVault(_vault);
-        reserveFund = IReserveFund(_reserveFund);
-        usdc = IERC20(_usdc);
+        ENGINE = IAutocallEngine(_engine);
+        VAULT = IXYieldVault(_vault);
+        RESERVE_FUND = IReserveFund(_reserveFund);
+        USDC = IERC20(_usdc);
     }
 
     struct Stats {
@@ -39,14 +39,14 @@ contract ProtocolStats {
 
     /// @notice Get all protocol stats in a single call
     function getStats(uint256 totalNotional) external view returns (Stats memory stats) {
-        stats.totalNotesCreated = engine.getNoteCount();
-        stats.tvl = vault.totalAssets();
-        stats.maxDeposit = vault.maxDeposit(address(0));
-        stats.reserveBalance = reserveFund.getBalance();
-        stats.engineUsdcBalance = usdc.balanceOf(address(engine));
-        stats.vaultUsdcBalance = usdc.balanceOf(address(vault));
+        stats.totalNotesCreated = ENGINE.getNoteCount();
+        stats.tvl = VAULT.totalAssets();
+        stats.maxDeposit = VAULT.maxDeposit(address(0));
+        stats.reserveBalance = RESERVE_FUND.getBalance();
+        stats.engineUsdcBalance = USDC.balanceOf(address(ENGINE));
+        stats.vaultUsdcBalance = USDC.balanceOf(address(VAULT));
         stats.reserveLevel = totalNotional > 0
-            ? reserveFund.getLevel(totalNotional)
+            ? RESERVE_FUND.getLevel(totalNotional)
             : 10000;
     }
 }

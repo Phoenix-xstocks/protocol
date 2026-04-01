@@ -15,7 +15,7 @@ import { IOneInchSwapper } from "../interfaces/IOneInchSwapper.sol";
 contract TestnetSwap is IOneInchSwapper, Ownable {
     using SafeERC20 for IERC20;
 
-    IERC20 public immutable usdc;
+    IERC20 public immutable USDC;
 
     /// @notice Price of each xStock in USDC (6 decimals).
     ///         e.g., NVDAx at $130 → prices[NVDAx] = 130e6
@@ -26,7 +26,7 @@ contract TestnetSwap is IOneInchSwapper, Ownable {
 
     constructor(address _usdc, address _owner) Ownable(_owner) {
         require(_usdc != address(0), "zero usdc");
-        usdc = IERC20(_usdc);
+        USDC = IERC20(_usdc);
     }
 
     /// @notice Set the USDC price for an xStock token
@@ -45,12 +45,12 @@ contract TestnetSwap is IOneInchSwapper, Ownable {
         require(amountIn > 0, "zero amount");
         IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
 
-        if (tokenIn == address(usdc)) {
+        if (tokenIn == address(USDC)) {
             // USDC → xStock: amountOut = amountIn * 1e18 / priceUsdc
             uint256 price = prices[tokenOut];
             require(price > 0, "price not set");
             amountOut = (amountIn * 1e18) / price;
-        } else if (tokenOut == address(usdc)) {
+        } else if (tokenOut == address(USDC)) {
             // xStock → USDC: amountOut = amountIn * priceUsdc / 1e18
             uint256 price = prices[tokenIn];
             require(price > 0, "price not set");
@@ -73,11 +73,11 @@ contract TestnetSwap is IOneInchSwapper, Ownable {
         require(amountIn > 0, "zero amount");
         IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
 
-        if (tokenIn == address(usdc)) {
+        if (tokenIn == address(USDC)) {
             uint256 price = prices[tokenOut];
             require(price > 0, "price not set");
             amountOut = (amountIn * 1e18) / price;
-        } else if (tokenOut == address(usdc)) {
+        } else if (tokenOut == address(USDC)) {
             uint256 price = prices[tokenIn];
             require(price > 0, "price not set");
             amountOut = (amountIn * price) / 1e18;

@@ -5,21 +5,12 @@ import { Script, console } from "forge-std/Script.sol";
 import { TestnetSwap } from "../src/integrations/TestnetSwap.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-interface IMintable {
-    function mint(address to, uint256 amount) external;
-}
-
 /// @title DeployTestnetSwap
-/// @notice Deploy TestnetSwap, set prices, add liquidity for all xStocks
+/// @notice Deploy TestnetSwap, set prices, add liquidity for official xStock tokens (WQQQX, WSPYX)
 contract DeployTestnetSwap is Script {
     address constant USDC   = 0x6b57475467cd854d36Be7FB614caDa5207838943;
-    address constant NVDAx  = 0x3EfB67e01d5Ab3dd37dBb34D8a8c09D0682Bfc4E;
-    address constant TSLAx  = 0x2a968432b2BC26dA460A0B7262414552288C894E;
-    address constant METAx  = 0x7EA9266A024e168341827a9c4621EC5b16cda65a;
-    address constant AAPLx  = 0x556bF69F08c7f712B1E79F1486a080165Dc7949c;
-    address constant MSFTx  = 0xB13A4f9D68cd1BaD482940D30b7029DBe746c153;
-    address constant AMZNx  = 0xe9429944c6f7ba23aAbfc1F9D6556CcDC2a4059E;
-    address constant GOOGLx = 0x0023F314f5E79db2C8d6b263760a3191A0F13d15;
+    address constant WQQQX  = 0x267ED9BC43B16D832cB9Aaf0e3445f0cC9f536d9;
+    address constant WSPYX  = 0x9eF9f9B22d3CA9769e28e769e2AAA3C2B0072D0e;
 
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");
@@ -34,48 +25,33 @@ contract DeployTestnetSwap is Script {
         console.log("TestnetSwap:", address(swap));
 
         // 2. Set prices (USDC 6 decimals)
-        swap.setPrice(NVDAx,  130e6);  // NVDA  $130
-        swap.setPrice(TSLAx,  280e6);  // TSLA  $280
-        swap.setPrice(METAx,  580e6);  // META  $580
-        swap.setPrice(AAPLx,  230e6);  // AAPL  $230
-        swap.setPrice(MSFTx,  430e6);  // MSFT  $430
-        swap.setPrice(AMZNx,  200e6);  // AMZN  $200
-        swap.setPrice(GOOGLx, 175e6);  // GOOGL $175
-        console.log("Prices set for 7 xStocks");
+        swap.setPrice(WQQQX, 480e6);  // QQQ ~$480
+        swap.setPrice(WSPYX, 560e6);  // SPY ~$560
+        console.log("Prices set for WQQQX and WSPYX");
 
-        // 3. Mint xStocks to deployer (we own them, they're mintable)
-        uint256 liq = 100_000 ether; // 100k tokens each
-        IMintable(NVDAx).mint(deployer, liq);
-        IMintable(TSLAx).mint(deployer, liq);
-        IMintable(METAx).mint(deployer, liq);
+        // 3. Add xStock liquidity from deployer wallet (official tokens, no minting)
+        uint256 qqqBal = IERC20(WQQQX).balanceOf(deployer);
+        uint256 spyBal = IERC20(WSPYX).balanceOf(deployer);
+        console.log("WQQQX balance:", qqqBal / 1e18, "tokens");
+        console.log("WSPYX balance:", spyBal / 1e18, "tokens");
 
-        // 4. Add xStock liquidity (we can mint these, we deployed them)
-        IERC20(NVDAx).approve(address(swap), liq);
-        swap.addLiquidity(NVDAx, liq);
+        if (qqqBal > 0) {
+            IERC20(WQQQX).approve(address(swap), qqqBal);
+            swap.addLiquidity(WQQQX, qqqBal);
+        }
 
-        IERC20(TSLAx).approve(address(swap), liq);
-        swap.addLiquidity(TSLAx, liq);
+        if (spyBal > 0) {
+            IERC20(WSPYX).approve(address(swap), spyBal);
+            swap.addLiquidity(WSPYX, spyBal);
+        }
 
-        IERC20(METAx).approve(address(swap), liq);
-        swap.addLiquidity(METAx, liq);
-
-        // 5. Add USDC liquidity from our wallet (can't mint USDC)
+        // 4. Add USDC liquidity from deployer wallet
         uint256 usdcBal = IERC20(USDC).balanceOf(deployer);
         uint256 usdcLiq = usdcBal > 5000e6 ? 5000e6 : usdcBal / 2;
         IERC20(USDC).approve(address(swap), usdcLiq);
         swap.addLiquidity(USDC, usdcLiq);
 
-        console.log("Liquidity: 100k xStocks each +", usdcLiq / 1e6, "USDC");
-
-        // 6. Test swap: 100 USDC -> NVDAx
-        IERC20(USDC).approve(address(swap), 100e6);
-        uint256 out = swap.swap(USDC, NVDAx, 100e6);
-        console.log("Test: 100 USDC -> NVDAx =", out / 1e15, "* 1e-3 tokens");
-
-        // 7. Test reverse: NVDAx -> USDC
-        IERC20(NVDAx).approve(address(swap), out);
-        uint256 usdcBack = swap.swap(NVDAx, USDC, out);
-        console.log("Test: NVDAx -> USDC =", usdcBack / 1e6, "USDC");
+        console.log("USDC liquidity added:", usdcLiq / 1e6, "USDC");
 
         vm.stopBroadcast();
 

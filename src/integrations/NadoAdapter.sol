@@ -32,8 +32,8 @@ interface INadoPerp {
 contract NadoAdapter is INadoAdapter, Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    INadoPerp public immutable nadoPerp;
-    IERC20 public immutable marginToken;
+    INadoPerp public immutable NADO_PERP;
+    IERC20 public immutable MARGIN_TOKEN;
 
     struct Position {
         uint256 pairIndex;
@@ -52,8 +52,8 @@ contract NadoAdapter is INadoAdapter, Ownable, ReentrancyGuard {
     error PositionAlreadyExists(bytes32 positionId);
 
     constructor(address _nadoPerp, address _marginToken, address _owner) Ownable(_owner) {
-        nadoPerp = INadoPerp(_nadoPerp);
-        marginToken = IERC20(_marginToken);
+        NADO_PERP = INadoPerp(_nadoPerp);
+        MARGIN_TOKEN = IERC20(_marginToken);
     }
 
     /// @inheritdoc INadoAdapter
@@ -63,9 +63,9 @@ contract NadoAdapter is INadoAdapter, Ownable, ReentrancyGuard {
         uint256 leverage
     ) external onlyOwner nonReentrant returns (bytes32 positionId) {
         uint256 marginRequired = notional / leverage;
-        marginToken.forceApprove(address(nadoPerp), marginRequired);
+        MARGIN_TOKEN.forceApprove(address(NADO_PERP), marginRequired);
 
-        positionId = nadoPerp.openPosition(pairIndex, true, notional, leverage, address(marginToken));
+        positionId = NADO_PERP.openPosition(pairIndex, true, notional, leverage, address(MARGIN_TOKEN));
 
         if (positions[positionId].open) revert PositionAlreadyExists(positionId);
 
@@ -83,10 +83,11 @@ contract NadoAdapter is INadoAdapter, Ownable, ReentrancyGuard {
     function closeShort(bytes32 positionId) external onlyOwner nonReentrant returns (uint256 pnl) {
         if (!positions[positionId].open) revert PositionNotOpen(positionId);
 
-        int256 rawPnl = nadoPerp.closePosition(positionId);
+        int256 rawPnl = NADO_PERP.closePosition(positionId);
         positions[positionId].open = false;
 
         // Return absolute PnL; negative PnL returns 0 to caller (loss handled by margin)
+        // forge-lint: disable-next-line(unsafe-typecast)
         pnl = rawPnl > 0 ? uint256(rawPnl) : 0;
 
         emit ShortClosed(positionId, pnl);
@@ -96,7 +97,7 @@ contract NadoAdapter is INadoAdapter, Ownable, ReentrancyGuard {
     function claimFunding(bytes32 positionId) external onlyOwner nonReentrant returns (uint256 fundingAmount) {
         if (!positions[positionId].open) revert PositionNotOpen(positionId);
 
-        fundingAmount = nadoPerp.claimFunding(positionId);
+        fundingAmount = NADO_PERP.claimFunding(positionId);
 
         emit FundingClaimed(positionId, fundingAmount);
     }
@@ -107,7 +108,7 @@ contract NadoAdapter is INadoAdapter, Ownable, ReentrancyGuard {
         view
         returns (int256 unrealizedPnl, uint256 margin, uint256 size, uint256 accumulatedFunding)
     {
-        return nadoPerp.getPosition(positionId);
+        return NADO_PERP.getPosition(positionId);
     }
 
     /// @notice Recover tokens sent to this contract by mistake.

@@ -225,7 +225,7 @@ contract AutocallEngineTest is Test {
         PricingResult memory pricing = PricingResult({
             putPremiumBps: 900,
             kiProbabilityBps: 500,
-            expectedKILossBps: 200,
+            expectedKiLossBps: 200,
             vegaBps: 100,
             inputsHash: keccak256("test")
         });
@@ -422,7 +422,7 @@ contract AutocallEngineTest is Test {
         PricingResult memory pricing = PricingResult({
             putPremiumBps: 900,
             kiProbabilityBps: 500,
-            expectedKILossBps: 200,
+            expectedKiLossBps: 200,
             vegaBps: 100,
             inputsHash: keccak256("test")
         });
@@ -644,7 +644,7 @@ contract AutocallEngineTest is Test {
 
         uint256 holderBefore = usdc.balanceOf(holder);
         vm.prank(holder);
-        engine.settleKI(noteId, true);
+        engine.settleKi(noteId, true);
 
         assertEq(uint256(engine.getState(noteId)), uint256(State.Settled));
         assertGt(usdc.balanceOf(holder), holderBefore, "holder should receive payout");
@@ -665,7 +665,7 @@ contract AutocallEngineTest is Test {
 
         uint256 holderBefore = usdc.balanceOf(holder);
         vm.prank(holder);
-        engine.settleKI(noteId, false);
+        engine.settleKi(noteId, false);
 
         assertEq(uint256(engine.getState(noteId)), uint256(State.Settled));
         // Cash settlement at worst-of performance (40%)

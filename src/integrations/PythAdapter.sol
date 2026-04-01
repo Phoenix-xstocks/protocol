@@ -25,7 +25,7 @@ interface IPyth {
 ///
 ///         Pyth on Ink Sepolia: 0x2880aB155794e7179c9eE2e38200202908C17B43
 contract PythAdapter is Ownable {
-    IPyth public immutable pyth;
+    IPyth public immutable PYTH;
 
     /// @notice Maps xStock address -> Pyth price feed ID
     mapping(address => bytes32) public feedIds;
@@ -43,7 +43,7 @@ contract PythAdapter is Ownable {
 
     constructor(address _pyth, address _owner) Ownable(_owner) {
         require(_pyth != address(0), "zero pyth");
-        pyth = IPyth(_pyth);
+        PYTH = IPyth(_pyth);
     }
 
     /// @notice Set Pyth feed ID for an xStock token
@@ -65,8 +65,8 @@ contract PythAdapter is Ownable {
     ///         Caller sends VAA data from Pyth Hermes API.
     ///         Requires msg.value to cover the update fee.
     function updatePrices(bytes[] calldata priceUpdateData) external payable {
-        uint256 fee = pyth.getUpdateFee(priceUpdateData);
-        pyth.updatePriceFeeds{ value: fee }(priceUpdateData);
+        uint256 fee = PYTH.getUpdateFee(priceUpdateData);
+        PYTH.updatePriceFeeds{ value: fee }(priceUpdateData);
         emit PricesUpdated(priceUpdateData.length, fee);
 
         // Refund excess ETH
@@ -80,7 +80,7 @@ contract PythAdapter is Ownable {
     /// @return price Price in 8-decimal format (same as Chainlink)
     /// @return timestamp Publication timestamp
     function getLatestPrice(bytes32 feedId) external view returns (int192 price, uint32 timestamp) {
-        IPyth.Price memory p = pyth.getPriceNoOlderThan(feedId, maxPriceAge);
+        IPyth.Price memory p = PYTH.getPriceNoOlderThan(feedId, maxPriceAge);
         require(p.price > 0, "invalid price");
 
         // Normalize to 8 decimals (Pyth uses variable expo, typically -8)
@@ -91,14 +91,19 @@ contract PythAdapter is Ownable {
             normalized = int256(p.price);
         } else if (p.expo > targetExpo) {
             // expo=-5, target=-8 → need MORE decimals → multiply by 10^(expo - target) = 10^3
+            // forge-lint: disable-next-line(unsafe-typecast)
             uint256 diff = uint256(int256(p.expo - targetExpo));
+            // forge-lint: disable-next-line(unsafe-typecast)
             normalized = int256(p.price) * int256(10 ** diff);
         } else {
             // expo=-10, target=-8 → need FEWER decimals → divide by 10^(target - expo) = 10^2
+            // forge-lint: disable-next-line(unsafe-typecast)
             uint256 diff = uint256(int256(targetExpo - p.expo));
+            // forge-lint: disable-next-line(unsafe-typecast)
             normalized = int256(p.price) / int256(10 ** diff);
         }
 
+        // forge-lint: disable-next-line(unsafe-typecast)
         price = int192(normalized);
         timestamp = uint32(p.publishTime);
     }
@@ -108,7 +113,7 @@ contract PythAdapter is Ownable {
         bytes32 feedId = feedIds[asset];
         if (feedId == bytes32(0)) revert FeedNotConfigured(asset);
 
-        IPyth.Price memory p = pyth.getPriceNoOlderThan(feedId, maxPriceAge);
+        IPyth.Price memory p = PYTH.getPriceNoOlderThan(feedId, maxPriceAge);
         if (p.price <= 0) revert InvalidPrice(asset, p.price);
 
         // Normalize to 8 decimals
@@ -117,13 +122,18 @@ contract PythAdapter is Ownable {
         if (p.expo == targetExpo) {
             normalized = int256(p.price);
         } else if (p.expo > targetExpo) {
+            // forge-lint: disable-next-line(unsafe-typecast)
             uint256 diff = uint256(int256(p.expo - targetExpo));
+            // forge-lint: disable-next-line(unsafe-typecast)
             normalized = int256(p.price) * int256(10 ** diff);
         } else {
+            // forge-lint: disable-next-line(unsafe-typecast)
             uint256 diff = uint256(int256(targetExpo - p.expo));
+            // forge-lint: disable-next-line(unsafe-typecast)
             normalized = int256(p.price) / int256(10 ** diff);
         }
 
+        // forge-lint: disable-next-line(unsafe-typecast)
         price = int192(normalized);
         timestamp = uint32(p.publishTime);
     }
@@ -134,7 +144,7 @@ contract PythAdapter is Ownable {
     }
 
     /// @notice Recover ETH sent to this contract
-    function recoverETH() external onlyOwner {
+    function recoverEth() external onlyOwner {
         (bool ok, ) = msg.sender.call{ value: address(this).balance }("");
         require(ok, "transfer failed");
     }

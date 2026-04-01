@@ -206,7 +206,7 @@ contract EndToEndTest is Test {
         PricingResult memory pricing = PricingResult({
             putPremiumBps: 900,
             kiProbabilityBps: 500,
-            expectedKILossBps: 200,
+            expectedKiLossBps: 200,
             vegaBps: 100,
             inputsHash: keccak256("test")
         });
@@ -274,7 +274,7 @@ contract EndToEndTest is Test {
         PricingResult memory pricing = PricingResult({
             putPremiumBps: 900,
             kiProbabilityBps: 500,
-            expectedKILossBps: 200,
+            expectedKiLossBps: 200,
             vegaBps: 100,
             inputsHash: keccak256("test")
         });
@@ -315,7 +315,7 @@ contract EndToEndTest is Test {
         hedge.setRecoveredAmount(depositAmount); // hedge recovers full notional
         uint256 balBefore = usdc.balanceOf(user);
         vm.prank(user);
-        engine.settleKI(noteId, false);
+        engine.settleKi(noteId, false);
 
         assertEq(uint256(engine.getState(noteId)), uint256(State.Settled));
 
@@ -344,7 +344,7 @@ contract EndToEndTest is Test {
         PricingResult memory pricing = PricingResult({
             putPremiumBps: 900,
             kiProbabilityBps: 500,
-            expectedKILossBps: 200,
+            expectedKiLossBps: 200,
             vegaBps: 100,
             inputsHash: keccak256("test")
         });
@@ -437,7 +437,7 @@ contract EndToEndTest is Test {
         PricingResult memory pricing = PricingResult({
             putPremiumBps: 900,
             kiProbabilityBps: 500,
-            expectedKILossBps: 200,
+            expectedKiLossBps: 200,
             vegaBps: 100,
             inputsHash: keccak256("test")
         });
@@ -492,7 +492,7 @@ contract EndToEndTest is Test {
 
         PricingResult memory pricing = PricingResult({
             putPremiumBps: 900, kiProbabilityBps: 500,
-            expectedKILossBps: 200, vegaBps: 100, inputsHash: keccak256("test")
+            expectedKiLossBps: 200, vegaBps: 100, inputsHash: keccak256("test")
         });
         cre.setPricing(noteId, pricing);
 
@@ -563,7 +563,7 @@ contract EndToEndTest is Test {
 
         PricingResult memory pricing = PricingResult({
             putPremiumBps: 900, kiProbabilityBps: 500,
-            expectedKILossBps: 200, vegaBps: 100, inputsHash: keccak256("test")
+            expectedKiLossBps: 200, vegaBps: 100, inputsHash: keccak256("test")
         });
         cre.setPricing(noteId, pricing);
 
@@ -612,7 +612,7 @@ contract EndToEndTest is Test {
         PricingResult memory pricing = PricingResult({
             putPremiumBps: 900,
             kiProbabilityBps: 500,
-            expectedKILossBps: 200,
+            expectedKiLossBps: 200,
             vegaBps: 100,
             inputsHash: keccak256("test")
         });
@@ -689,7 +689,7 @@ contract EndToEndTest is Test {
         hedge.setRecoveredAmount(depositC);
         uint256 balCBefore = usdc.balanceOf(userC);
         vm.prank(userC);
-        engine.settleKI(noteC, false);
+        engine.settleKi(noteC, false);
         assertEq(uint256(engine.getState(noteC)), uint256(State.Settled), "noteC settled");
         uint256 cashPayout = usdc.balanceOf(userC) - balCBefore;
         // Cash = notional * 40% = 20000e6 * 4000/10000 = 8000e6
@@ -743,7 +743,7 @@ contract EndToEndTest is Test {
             PricingResult memory pricing = PricingResult({
                 putPremiumBps: 900,
                 kiProbabilityBps: 500,
-                expectedKILossBps: 200,
+                expectedKiLossBps: 200,
                 vegaBps: 100,
                 inputsHash: keccak256("test")
             });

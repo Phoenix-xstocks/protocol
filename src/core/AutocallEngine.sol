@@ -73,15 +73,15 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     uint256 public noteCount;
     bytes32[] public noteIds;
 
-    IERC20 public immutable usdc;
-    IHedgeManager public immutable hedgeManager;
-    ICREConsumer public immutable creConsumer;
-    IIssuanceGate public immutable issuanceGate;
-    ICouponCalculator public immutable couponCalculator;
-    IPriceFeed public immutable priceFeed;
-    IVolOracle public immutable volOracle;
-    ICarryEngine public immutable carryEngine;
-    NoteToken public immutable noteToken;
+    IERC20 public immutable USDC;
+    IHedgeManager public immutable HEDGE_MANAGER;
+    ICREConsumer public immutable CRE_CONSUMER;
+    IIssuanceGate public immutable ISSUANCE_GATE;
+    ICouponCalculator public immutable COUPON_CALCULATOR;
+    IPriceFeed public immutable PRICE_FEED;
+    IVolOracle public immutable VOL_ORACLE;
+    ICarryEngine public immutable CARRY_ENGINE;
+    NoteToken public immutable NOTE_TOKEN;
 
     /// @notice Sablier coupon streaming adapter (set post-deploy, optional)
     ISablierStream public sablierStream;
@@ -144,15 +144,15 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         address _noteToken
     ) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
-        usdc = IERC20(_usdc);
-        hedgeManager = IHedgeManager(_hedgeManager);
-        creConsumer = ICREConsumer(_creConsumer);
-        issuanceGate = IIssuanceGate(_issuanceGate);
-        couponCalculator = ICouponCalculator(_couponCalculator);
-        priceFeed = IPriceFeed(_priceFeed);
-        volOracle = IVolOracle(_volOracle);
-        carryEngine = ICarryEngine(_carryEngine);
-        noteToken = NoteToken(_noteToken);
+        USDC = IERC20(_usdc);
+        HEDGE_MANAGER = IHedgeManager(_hedgeManager);
+        CRE_CONSUMER = ICREConsumer(_creConsumer);
+        ISSUANCE_GATE = IIssuanceGate(_issuanceGate);
+        COUPON_CALCULATOR = ICouponCalculator(_couponCalculator);
+        PRICE_FEED = IPriceFeed(_priceFeed);
+        VOL_ORACLE = IVolOracle(_volOracle);
+        CARRY_ENGINE = ICarryEngine(_carryEngine);
+        NOTE_TOKEN = NoteToken(_noteToken);
     }
 
     /// @notice Set the Chainlink feed ID for an xStock token. Admin only.
@@ -200,7 +200,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         noteCount++;
 
         // Auto-register note params on CREConsumer so CRE pricing can be accepted
-        creConsumer.registerNoteParams(
+        CRE_CONSUMER.registerNoteParams(
             noteId,
             PricingParams({
                 basket: basket,
@@ -229,20 +229,20 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         Note storage note = _notes[noteId];
         _requireState(noteId, State.Created);
 
-        PricingResult memory pricing = creConsumer.getAcceptedPricing(noteId);
+        PricingResult memory pricing = CRE_CONSUMER.getAcceptedPricing(noteId);
 
         // Fetch average vol across basket for dynamic safety margin
         uint256 avgVol = 0;
         for (uint256 i = 0; i < note.basket.length; i++) {
-            avgVol += volOracle.getVol(note.basket[i]);
+            avgVol += VOL_ORACLE.getVol(note.basket[i]);
         }
         avgVol = avgVol / note.basket.length;
 
         // Fetch carry rate for carry enhancement
-        uint256 carryRate = carryEngine.getTotalCarryRate();
+        uint256 carryRate = CARRY_ENGINE.getTotalCarryRate();
 
         (uint256 baseBps, , uint256 totalBps) =
-            couponCalculator.calculateCoupon(pricing.putPremiumBps, avgVol, carryRate);
+            COUPON_CALCULATOR.calculateCoupon(pricing.putPremiumBps, avgVol, carryRate);
 
         note.baseCouponBps = baseBps;
         note.totalCouponBps = totalBps;
@@ -264,14 +264,14 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         // Fetch vol for safety margin
         uint256 avgVol = 0;
         for (uint256 i = 0; i < note.basket.length; i++) {
-            avgVol += volOracle.getVol(note.basket[i]);
+            avgVol += VOL_ORACLE.getVol(note.basket[i]);
         }
         avgVol = note.basket.length > 0 ? avgVol / note.basket.length : 0;
 
-        uint256 carryRate = carryEngine.getTotalCarryRate();
+        uint256 carryRate = CARRY_ENGINE.getTotalCarryRate();
 
         (uint256 baseBps, , uint256 totalBps) =
-            couponCalculator.calculateCoupon(putPremiumBps, avgVol, carryRate);
+            COUPON_CALCULATOR.calculateCoupon(putPremiumBps, avgVol, carryRate);
 
         note.baseCouponBps = baseBps;
         note.totalCouponBps = totalBps;
@@ -293,16 +293,16 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         // Issuance gate check (skip CRE pricing check in testnet mode)
         if (!testnetMode) {
             (bool approved, string memory reason) =
-                issuanceGate.checkIssuance(noteId, note.notional, note.basket);
+                ISSUANCE_GATE.checkIssuance(noteId, note.notional, note.basket);
             if (!approved) revert IssuanceNotApproved(reason);
         }
 
         // Open hedge (HedgeManager handles testnet mode internally)
-        usdc.safeIncreaseAllowance(address(hedgeManager), note.notional);
-        hedgeManager.openHedge(noteId, note.basket, note.notional);
+        USDC.safeIncreaseAllowance(address(HEDGE_MANAGER), note.notional);
+        HEDGE_MANAGER.openHedge(noteId, note.basket, note.notional);
 
         // Update issuance gate counters
-        issuanceGate.noteActivated(note.notional);
+        ISSUANCE_GATE.noteActivated(note.notional);
 
         // Set observation time so first observe must wait OBS_INTERVAL_DAYS
         note.lastObservationTime = block.timestamp;
@@ -356,7 +356,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
             _payCoupon(noteId, note, true);
         } else {
             // Coupon missed -- accumulate base coupon as memory
-            uint256 baseCouponAmount = couponCalculator.calculateCouponAmount(
+            uint256 baseCouponAmount = COUPON_CALCULATOR.calculateCouponAmount(
                 note.notional, note.baseCouponBps, OBS_INTERVAL_DAYS
             );
             note.memoryCoupon += baseCouponAmount;
@@ -378,22 +378,22 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     // ----------------------------------------------------------------
 
     /// @inheritdoc IAutocallEngine
-    function settleKI(bytes32 noteId, bool preferPhysical) external override nonReentrant {
+    function settleKi(bytes32 noteId, bool preferPhysical) external override nonReentrant {
         Note storage note = _notes[noteId];
         _requireState(noteId, State.KISettle);
         if (msg.sender != note.holder) revert OnlyHolder();
 
         _cancelAllNoteStreams(noteId);
-        uint256 recovered = hedgeManager.closeHedge(noteId);
+        uint256 recovered = HEDGE_MANAGER.closeHedge(noteId);
         uint256 worstPerfBps = _getWorstPerformance(note);
 
         if (preferPhysical) {
-            usdc.safeTransfer(note.holder, recovered);
+            USDC.safeTransfer(note.holder, recovered);
             emit NoteSettled(noteId, recovered, true);
         } else {
             uint256 cashValue = (note.notional * worstPerfBps) / BPS;
             uint256 payout = cashValue < recovered ? cashValue : recovered;
-            usdc.safeTransfer(note.holder, payout);
+            USDC.safeTransfer(note.holder, payout);
             emit NoteSettled(noteId, payout, false);
         }
 
@@ -403,7 +403,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
 
     /// @notice Admin force-settle KI if holder doesn't choose within deadline.
     ///         Defaults to cash settlement to protect the holder.
-    function forceSettleKI(bytes32 noteId) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
+    function forceSettleKi(bytes32 noteId) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
         Note storage note = _notes[noteId];
         _requireState(noteId, State.KISettle);
         require(
@@ -412,11 +412,11 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         );
 
         _cancelAllNoteStreams(noteId);
-        uint256 recovered = hedgeManager.closeHedge(noteId);
+        uint256 recovered = HEDGE_MANAGER.closeHedge(noteId);
         uint256 worstPerfBps = _getWorstPerformance(note);
         uint256 cashValue = (note.notional * worstPerfBps) / BPS;
         uint256 payout = cashValue < recovered ? cashValue : recovered;
-        usdc.safeTransfer(note.holder, payout);
+        USDC.safeTransfer(note.holder, payout);
 
         _burnNoteToken(noteId, note);
         _transition(noteId, State.Settled);
@@ -566,13 +566,14 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
             bytes32 feedId = feedIds[note.basket[i]];
             require(feedId != bytes32(0), "feed not configured");
 
-            (int192 currentPrice, uint32 feedTimestamp) = priceFeed.getLatestPrice(feedId);
+            (int192 currentPrice, uint32 feedTimestamp) = PRICE_FEED.getLatestPrice(feedId);
             require(currentPrice > 0, "invalid current price");
             if (block.timestamp - feedTimestamp > PRICE_MAX_STALENESS) {
                 revert StalePriceFeed(feedId, feedTimestamp);
             }
 
             // perf = currentPrice / initialPrice * BPS
+            // forge-lint: disable-next-line(unsafe-typecast)
             uint256 perf = (uint256(int256(currentPrice)) * BPS) / uint256(note.initialPrices[i]);
             if (perf < worst) {
                 worst = perf;
@@ -583,7 +584,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
 
     function _payCoupon(bytes32 noteId, Note storage note, bool includeMemory) internal {
         uint256 couponAmount =
-            couponCalculator.calculateCouponAmount(note.notional, note.totalCouponBps, OBS_INTERVAL_DAYS);
+            COUPON_CALCULATOR.calculateCouponAmount(note.notional, note.totalCouponBps, OBS_INTERVAL_DAYS);
 
         uint256 memoryPaid = 0;
         if (includeMemory && note.memoryCoupon > 0) {
@@ -593,13 +594,13 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
 
         // Pay memory coupon directly (lump sum — these are past-due amounts)
         if (memoryPaid > 0) {
-            usdc.safeTransfer(note.holder, memoryPaid);
+            USDC.safeTransfer(note.holder, memoryPaid);
         }
 
         // Stream current coupon via Sablier (if configured), else direct transfer
         if (couponAmount > 0) {
             if (address(sablierStream) != address(0)) {
-                usdc.forceApprove(address(sablierStream), couponAmount);
+                USDC.forceApprove(address(sablierStream), couponAmount);
                 uint256 streamId = sablierStream.startCouponStream(
                     noteId,
                     note.holder,
@@ -609,7 +610,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
                 );
                 emit CouponStreamed(noteId, streamId, couponAmount);
             } else {
-                usdc.safeTransfer(note.holder, couponAmount);
+                USDC.safeTransfer(note.holder, couponAmount);
             }
         }
 
@@ -626,9 +627,9 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
 
     function _settleAutocall(bytes32 noteId, Note storage note) internal {
         _cancelAllNoteStreams(noteId);
-        uint256 recovered = hedgeManager.closeHedge(noteId);
+        uint256 recovered = HEDGE_MANAGER.closeHedge(noteId);
         uint256 payout = note.notional < recovered ? note.notional : recovered;
-        usdc.safeTransfer(note.holder, payout);
+        USDC.safeTransfer(note.holder, payout);
 
         _burnNoteToken(noteId, note);
         _transition(noteId, State.Settled);
@@ -643,24 +644,24 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         } else {
             // No KI -- settle at par + remaining coupons
             _transition(noteId, State.NoKISettle);
-            _settleNoKI(noteId, note);
+            _settleNoKi(noteId, note);
         }
     }
 
-    function _settleNoKI(bytes32 noteId, Note storage note) internal {
+    function _settleNoKi(bytes32 noteId, Note storage note) internal {
         _cancelAllNoteStreams(noteId);
 
         // Pay out any accumulated memory coupons before settling
         if (note.memoryCoupon > 0) {
             uint256 memoryPaid = note.memoryCoupon;
             note.memoryCoupon = 0;
-            usdc.safeTransfer(note.holder, memoryPaid);
+            USDC.safeTransfer(note.holder, memoryPaid);
             emit CouponPaid(noteId, 0, memoryPaid);
         }
 
-        uint256 recovered = hedgeManager.closeHedge(noteId);
+        uint256 recovered = HEDGE_MANAGER.closeHedge(noteId);
         uint256 payout = note.notional < recovered ? note.notional : recovered;
-        usdc.safeTransfer(note.holder, payout);
+        USDC.safeTransfer(note.holder, payout);
 
         _burnNoteToken(noteId, note);
         _transition(noteId, State.Settled);
@@ -669,13 +670,13 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
 
     /// @notice Burn NoteToken + update issuance gate on settlement.
     function _burnNoteToken(bytes32 noteId, Note storage note) internal {
-        if (address(noteToken) != address(0)) {
-            uint256 tokenBal = noteToken.balanceOf(note.holder, uint256(noteId));
+        if (address(NOTE_TOKEN) != address(0)) {
+            uint256 tokenBal = NOTE_TOKEN.balanceOf(note.holder, uint256(noteId));
             if (tokenBal > 0) {
-                noteToken.burn(note.holder, noteId, tokenBal);
+                NOTE_TOKEN.burn(note.holder, noteId, tokenBal);
             }
         }
         // Update issuance gate counters
-        issuanceGate.noteSettled(note.notional);
+        ISSUANCE_GATE.noteSettled(note.notional);
     }
 }

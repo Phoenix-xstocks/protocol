@@ -35,8 +35,12 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
     bool public testnetMode;
 
     modifier onlyAuthorized() {
-        require(msg.sender == owner() || authorized[msg.sender], "not authorized");
+        _onlyAuthorized();
         _;
+    }
+
+    function _onlyAuthorized() internal view {
+        require(msg.sender == owner() || authorized[msg.sender], "not authorized");
     }
 
     function setAuthorized(address account, bool status) external onlyOwner {
@@ -152,7 +156,7 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
         }
 
         // 4. Borrow USDC from Tydro against xStock collateral
-        uint256 borrowed = tydro.borrowUSDC(notional / 2);
+        uint256 borrowed = tydro.borrowUsdc(notional / 2);
         pos.tydroBorrowed = borrowed;
         pos.spotNotional = totalSpot;
 
@@ -174,7 +178,7 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
 
         // 2. Repay Tydro borrow
         if (pos.tydroBorrowed > 0) {
-            tydro.repayUSDC(pos.tydroBorrowed);
+            tydro.repayUsdc(pos.tydroBorrowed);
         }
 
         // 3. Withdraw xStocks from Tydro and sell
@@ -185,6 +189,7 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
             recovered += swapper.swap(sh.asset, address(usdc), xStockAmount);
         }
 
+        // forge-lint: disable-next-line(unsafe-typecast)
         int256 pnl = int256(recovered) - int256(pos.spotNotional);
         pos.active = false;
 
@@ -261,8 +266,10 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
         }
 
         if (spotValue >= perpValue) {
+            // forge-lint: disable-next-line(unsafe-typecast)
             return int256((spotValue - perpValue) * BPS / pos.notional);
         } else {
+            // forge-lint: disable-next-line(unsafe-typecast)
             return -int256((perpValue - spotValue) * BPS / pos.notional);
         }
     }
@@ -292,6 +299,7 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
     }
 
     function _abs(int256 x) internal pure returns (uint256) {
+        // forge-lint: disable-next-line(unsafe-typecast)
         return x >= 0 ? uint256(x) : uint256(-x);
     }
 }

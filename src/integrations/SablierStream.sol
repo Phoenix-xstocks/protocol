@@ -35,7 +35,7 @@ contract CouponStreamer is ISablierStream, Ownable, ReentrancyGuard {
     // Storage
     // ----------------------------------------------------------------
 
-    IERC20 public immutable usdc;
+    IERC20 public immutable USDC;
 
     uint256 public nextStreamId;
     mapping(uint256 => Stream) public streams;
@@ -67,7 +67,7 @@ contract CouponStreamer is ISablierStream, Ownable, ReentrancyGuard {
     // ----------------------------------------------------------------
 
     constructor(address _usdc, address _owner) Ownable(_owner) {
-        usdc = IERC20(_usdc);
+        USDC = IERC20(_usdc);
         nextStreamId = 1; // stream IDs start at 1 (0 = invalid)
     }
 
@@ -89,15 +89,18 @@ contract CouponStreamer is ISablierStream, Ownable, ReentrancyGuard {
         if (_noteStreamIds[noteId].length >= MAX_STREAMS_PER_NOTE) revert TooManyStreams(noteId);
 
         // Pull USDC from caller (AutocallEngine)
-        usdc.safeTransferFrom(msg.sender, address(this), monthlyAmount);
+        USDC.safeTransferFrom(msg.sender, address(this), monthlyAmount);
 
         streamId = nextStreamId++;
 
         streams[streamId] = Stream({
             recipient: holder,
             canceled: false,
+            // forge-lint: disable-next-line(unsafe-typecast)
             startTime: uint40(startTime),
+            // forge-lint: disable-next-line(unsafe-typecast)
             endTime: uint40(endTime),
+            // forge-lint: disable-next-line(unsafe-typecast)
             deposit: uint128(monthlyAmount),
             withdrawn: 0
         });
@@ -124,7 +127,7 @@ contract CouponStreamer is ISablierStream, Ownable, ReentrancyGuard {
         uint256 refunded = uint256(s.deposit) - owed;
 
         if (refunded > 0) {
-            usdc.safeTransfer(msg.sender, refunded);
+            USDC.safeTransfer(msg.sender, refunded);
         }
 
         emit CouponStreamCancelled(noteId, streamId, refunded);
@@ -148,7 +151,7 @@ contract CouponStreamer is ISablierStream, Ownable, ReentrancyGuard {
         }
 
         if (totalRefunded > 0) {
-            usdc.safeTransfer(msg.sender, totalRefunded);
+            USDC.safeTransfer(msg.sender, totalRefunded);
         }
     }
 
@@ -165,8 +168,9 @@ contract CouponStreamer is ISablierStream, Ownable, ReentrancyGuard {
         uint256 withdrawable = vested - uint256(s.withdrawn);
         if (withdrawable == 0) revert NothingToWithdraw();
 
+        // forge-lint: disable-next-line(unsafe-typecast)
         s.withdrawn += uint128(withdrawable);
-        usdc.safeTransfer(msg.sender, withdrawable);
+        USDC.safeTransfer(msg.sender, withdrawable);
 
         emit CouponWithdrawn(streamId, msg.sender, withdrawable);
     }

@@ -22,7 +22,6 @@ import { CarryEngine } from "../src/hedge/CarryEngine.sol";
 // Integrations
 import { NadoAdapter } from "../src/integrations/NadoAdapter.sol";
 import { TydroAdapter } from "../src/integrations/TydroAdapter.sol";
-import { OneInchSwapper } from "../src/integrations/OneInchSwapper.sol";
 import { IOneInchSwapper } from "../src/interfaces/IOneInchSwapper.sol";
 import { PythAdapter } from "../src/integrations/PythAdapter.sol";
 import { CouponStreamer } from "../src/integrations/SablierStream.sol";
@@ -40,8 +39,8 @@ import { FeeCollector } from "../src/periphery/FeeCollector.sol";
 contract Deploy is Script {
     // Ink Sepolia testnet token addresses
     address constant USDC = 0x6b57475467cd854d36Be7FB614caDa5207838943;
-    address constant wQQQx = 0x267ED9BC43B16D832cB9Aaf0e3445f0cC9f536d9;
-    address constant wSPYx = 0x9eF9f9B22d3CA9769e28e769e2AAA3C2B0072D0e;
+    address constant WQQQX = 0x267ED9BC43B16D832cB9Aaf0e3445f0cC9f536d9;
+    address constant WSPYX = 0x9eF9f9B22d3CA9769e28e769e2AAA3C2B0072D0e;
 
     // External protocols
     address constant MOCK_NADO_PERP = address(0x1001); // Nado not on Ink testnet — skipped via testnetMode
@@ -176,6 +175,17 @@ contract Deploy is Script {
         // Wire coupon streaming into AutocallEngine and transfer ownership
         engine.setSablierStream(address(couponStreamer));
         couponStreamer.transferOwnership(address(engine));
+
+        // ---- 7. Configure Pyth feed IDs for official xStock tokens ----
+        // WSPYX → SPYX/USD
+        bytes32 spyxFeed = 0x2817b78438c769357182c04346fddaad1178c82f4048828fe0997c3c64624e14;
+        // WQQQX → QQQX/USD
+        bytes32 qqqxFeed = 0x178a6f73a5aede9d0d682e86b0047c9f333ed0efe5c6537ca937565219c4054d;
+
+        engine.setFeedId(WSPYX, spyxFeed);
+        engine.setFeedId(WQQQX, qqqxFeed);
+        priceFeed.setFeedId(WSPYX, spyxFeed);
+        priceFeed.setFeedId(WQQQX, qqqxFeed);
 
         vm.stopBroadcast();
 

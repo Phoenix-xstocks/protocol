@@ -172,9 +172,13 @@ contract VolOracle is IVolOracle, IReceiver, ERC165, AccessControl {
         emit VolsUpdated(assets, volsBps, correlationsBps, block.timestamp);
     }
 
-    function _pairKey(address a, address b) internal pure returns (bytes32) {
+    function _pairKey(address a, address b) internal pure returns (bytes32 result) {
         (address lo, address hi) = a < b ? (a, b) : (b, a);
-        return keccak256(abi.encodePacked(lo, hi));
+        assembly {
+            mstore(0x00, lo)
+            mstore(0x20, hi)
+            result := keccak256(0x0c, 40)
+        }
     }
 
     function _isStale() internal view returns (bool) {

@@ -285,6 +285,7 @@ contract EpochManager is IEpochManager, Ownable, ReentrancyGuard {
     }
 
     function _abs(int256 x) internal pure returns (uint256) {
+        // forge-lint: disable-next-line(unsafe-typecast)
         return x >= 0 ? uint256(x) : uint256(-x);
     }
 }

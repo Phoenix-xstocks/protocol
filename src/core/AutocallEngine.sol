@@ -219,6 +219,35 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         _transition(noteId, State.Priced);
     }
 
+    /// @notice Direct pricing for testnet — keeper provides premium directly.
+    ///         Bypasses CRE for testing. In production, use priceNote() with CRE.
+    function priceNoteDirect(
+        bytes32 noteId,
+        int256[] calldata initialPrices,
+        uint256 putPremiumBps
+    ) external onlyRole(KEEPER_ROLE) {
+        Note storage note = _notes[noteId];
+        _requireState(noteId, State.Created);
+
+        // Fetch vol for safety margin
+        uint256 avgVol = 0;
+        for (uint256 i = 0; i < note.basket.length; i++) {
+            avgVol += volOracle.getVol(note.basket[i]);
+        }
+        avgVol = note.basket.length > 0 ? avgVol / note.basket.length : 0;
+
+        uint256 carryRate = carryEngine.getTotalCarryRate();
+
+        (uint256 baseBps, , uint256 totalBps) =
+            couponCalculator.calculateCoupon(putPremiumBps, avgVol, carryRate);
+
+        note.baseCouponBps = baseBps;
+        note.totalCouponBps = totalBps;
+        note.initialPrices = initialPrices;
+
+        _transition(noteId, State.Priced);
+    }
+
     // ----------------------------------------------------------------
     // Activate: PRICED -> ACTIVE (requires issuance gate)
     // ----------------------------------------------------------------

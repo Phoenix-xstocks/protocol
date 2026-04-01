@@ -195,7 +195,7 @@ contract EpochManager is IEpochManager, Ownable, ReentrancyGuard {
 
         result.p1FullyPaid = (amounts.baseCouponsDue == 0) || (result.p1Paid >= amounts.baseCouponsDue);
 
-        // P2 (SENIOR): Principal repayment
+        // P2 (SENIOR): Principal repayment -> couponRecipient (engine pays holders)
         if (available > 0 && amounts.principalDue > 0) {
             result.p2Paid = _min(available, amounts.principalDue);
             available -= result.p2Paid;
@@ -215,7 +215,7 @@ contract EpochManager is IEpochManager, Ownable, ReentrancyGuard {
             available -= result.p3Paid;
         }
 
-        // P4 (JUNIOR): Hedge operational costs
+        // P4 (JUNIOR): Hedge operational costs -> couponRecipient (engine funds hedge)
         if (available > 0 && amounts.hedgeCostsDue > 0) {
             result.p4Paid = _min(available, amounts.hedgeCostsDue);
             available -= result.p4Paid;
@@ -241,10 +241,11 @@ contract EpochManager is IEpochManager, Ownable, ReentrancyGuard {
             usdc.safeTransfer(treasury, result.p6Paid);
         }
 
-        // Transfer P1/P3 coupon funds to couponRecipient (e.g. AutocallEngine)
-        uint256 couponFunds = result.p1Paid + result.p3Paid;
-        if (couponFunds > 0) {
-            usdc.safeTransfer(couponRecipient, couponFunds);
+        // Transfer P1/P2/P3/P4 funds to couponRecipient (AutocallEngine)
+        // P1: base coupons, P2: principal, P3: carry enhancement, P4: hedge costs
+        uint256 operatingFunds = result.p1Paid + result.p2Paid + result.p3Paid + result.p4Paid;
+        if (operatingFunds > 0) {
+            usdc.safeTransfer(couponRecipient, operatingFunds);
         }
 
         lastResult = result;

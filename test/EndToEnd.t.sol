@@ -153,16 +153,19 @@ contract EndToEndTest is Test {
         noteToken.grantRole(noteToken.MINTER_ROLE(), address(vault));
         noteToken.grantRole(noteToken.BURNER_ROLE(), address(engine));
 
-        // Configure 2-token basket (wQQQx + wSPYx — real testnet tokens)
-        basket = new address[](2);
-        basket[0] = address(0xA); // wQQQx
-        basket[1] = address(0xB); // wSPYx
+        // Configure 3-token flagship basket (NVDAx + TSLAx + METAx)
+        basket = new address[](3);
+        basket[0] = address(0xA); // NVDAx
+        basket[1] = address(0xB); // TSLAx
+        basket[2] = address(0xC); // METAx
 
         engine.setFeedId(address(0xA), FEED_A);
         engine.setFeedId(address(0xB), FEED_B);
+        engine.setFeedId(address(0xC), FEED_C);
 
-        priceFeed.setPrice(FEED_A, 450e8); // QQQ ~$450
-        priceFeed.setPrice(FEED_B, 550e8); // SPY ~$550
+        priceFeed.setPrice(FEED_A, 130e8);  // NVDA ~$130
+        priceFeed.setPrice(FEED_B, 280e8);  // TSLA ~$280
+        priceFeed.setPrice(FEED_C, 580e8);  // META ~$580
 
         // Fund user
         usdc.mint(user, 100_000e6);
@@ -207,9 +210,10 @@ contract EndToEndTest is Test {
         });
         cre.setPricing(noteId, pricing);
 
-        int256[] memory initialPrices = new int256[](2);
-        initialPrices[0] = 450e8; // QQQ
-        initialPrices[1] = 550e8; // SPY
+        int256[] memory initialPrices = new int256[](3);
+        initialPrices[0] = 130e8; // NVDA
+        initialPrices[1] = 280e8; // TSLA
+        initialPrices[2] = 580e8; // META
 
         vm.prank(keeper);
         engine.priceNote(noteId, initialPrices);
@@ -274,9 +278,10 @@ contract EndToEndTest is Test {
         });
         cre.setPricing(noteId, pricing);
 
-        int256[] memory initialPrices = new int256[](2);
-        initialPrices[0] = 450e8; // QQQ
-        initialPrices[1] = 550e8; // SPY
+        int256[] memory initialPrices = new int256[](3);
+        initialPrices[0] = 130e8; // NVDA
+        initialPrices[1] = 280e8; // TSLA
+        initialPrices[2] = 580e8; // META
 
         vm.prank(keeper);
         engine.priceNote(noteId, initialPrices);
@@ -292,8 +297,8 @@ contract EndToEndTest is Test {
         // Fund engine
         usdc.mint(address(engine), depositAmount * 2);
 
-        // Drop wSPYx to 40% of initial (550e8 -> 220e8)
-        priceFeed.setPrice(FEED_B, 220e8); // 40% of 550
+        // Drop TSLAx to 40% of initial (280e8 -> 112e8)
+        priceFeed.setPrice(FEED_B, 112e8); // 40% of 280
 
         // Run 6 observations with 30-day gaps
         uint256 t = block.timestamp;
@@ -343,9 +348,10 @@ contract EndToEndTest is Test {
         });
         cre.setPricing(noteId, pricing);
 
-        int256[] memory prices = new int256[](2);
-        prices[0] = 450e8;
-        prices[1] = 550e8;
+        int256[] memory prices = new int256[](3);
+        prices[0] = 130e8; // NVDA
+        prices[1] = 280e8; // TSLA
+        prices[2] = 580e8; // META
 
         vm.prank(keeper);
         engine.priceNote(noteId, prices);
@@ -361,7 +367,7 @@ contract EndToEndTest is Test {
         usdc.mint(address(engine), depositAmount * 3);
 
         // Set wSPYx to 80% — above coupon barrier (70%), below autocall (100%)
-        priceFeed.setPrice(FEED_B, 440e8); // 80% of 550e8
+        priceFeed.setPrice(FEED_B, 224e8); // 80% of 280e8 (TSLA)
 
         uint256 userBalBefore = usdc.balanceOf(user);
         uint256 t = block.timestamp;
@@ -435,9 +441,10 @@ contract EndToEndTest is Test {
         });
         cre.setPricing(noteId, pricing);
 
-        int256[] memory prices = new int256[](2);
-        prices[0] = 450e8;
-        prices[1] = 550e8;
+        int256[] memory prices = new int256[](3);
+        prices[0] = 130e8; // NVDA
+        prices[1] = 280e8; // TSLA
+        prices[2] = 580e8; // META
 
         vm.prank(keeper);
         engine.priceNote(noteId, prices);
@@ -487,8 +494,8 @@ contract EndToEndTest is Test {
         });
         cre.setPricing(noteId, pricing);
 
-        int256[] memory prices = new int256[](2);
-        prices[0] = 450e8; prices[1] = 550e8;
+        int256[] memory prices = new int256[](3);
+        prices[0] = 130e8; prices[1] = 280e8; prices[2] = 580e8;
 
         vm.prank(keeper);
         engine.priceNote(noteId, prices);
@@ -499,7 +506,7 @@ contract EndToEndTest is Test {
         usdc.mint(address(engine), depositAmount * 3);
 
         // Obs 1-3: market crashes — miss coupons (60% perf)
-        priceFeed.setPrice(FEED_B, 330e8); // 60% of 550e8
+        priceFeed.setPrice(FEED_B, 168e8); // 60% of 280e8 (TSLA)
 
         uint256 t = block.timestamp;
         for (uint256 i = 0; i < 3; i++) {
@@ -513,7 +520,7 @@ contract EndToEndTest is Test {
         assertGt(memCoupon, 0, "3 missed coupons accumulated");
 
         // Obs 4: market recovers — autocall at 100%
-        priceFeed.setPrice(FEED_B, 550e8); // back to 100%
+        priceFeed.setPrice(FEED_B, 280e8); // back to 100% (TSLA)
         vm.warp(t + (3 * 31 days));
 
         uint256 balBefore = usdc.balanceOf(user);
@@ -558,8 +565,8 @@ contract EndToEndTest is Test {
         });
         cre.setPricing(noteId, pricing);
 
-        int256[] memory prices = new int256[](2);
-        prices[0] = 450e8; prices[1] = 550e8;
+        int256[] memory prices = new int256[](3);
+        prices[0] = 130e8; prices[1] = 280e8; prices[2] = 580e8;
 
         vm.prank(keeper);
         engine.priceNote(noteId, prices);
@@ -609,9 +616,10 @@ contract EndToEndTest is Test {
         });
         cre.setPricing(noteId, pricing);
 
-        int256[] memory prices = new int256[](2);
-        prices[0] = 450e8;
-        prices[1] = 550e8;
+        int256[] memory prices = new int256[](3);
+        prices[0] = 130e8; // NVDA
+        prices[1] = 280e8; // TSLA
+        prices[2] = 580e8; // META
 
         vm.prank(keeper);
         engine.priceNote(noteId, prices);
@@ -650,14 +658,14 @@ contract EndToEndTest is Test {
 
         // --- Note A: autocall on observation 1 (prices at 100%) ---
         vm.warp(block.timestamp + 31 days);
-        // Prices still at initial (450e8, 550e8) => 100% perf => autocall
+        // Prices still at initial (130e8, 280e8, 580e8) => 100% perf => autocall
         uint256 balABefore = usdc.balanceOf(userA);
         engine.observe(noteA);
         assertEq(uint256(engine.getState(noteA)), uint256(State.Settled), "noteA should autocall");
         assertGt(usdc.balanceOf(userA) - balABefore, 0, "userA gets payout");
 
         // --- Note B: goes to maturity at 80% perf (no KI, no autocall) ---
-        priceFeed.setPrice(FEED_B, 440e8); // 80% of 550 => above coupon (70%), below autocall
+        priceFeed.setPrice(FEED_B, 224e8); // TSLA at 80% of 280 => above coupon (70%), below autocall
         uint256 tB = block.timestamp;
         for (uint256 i = 0; i < 6; i++) {
             vm.warp(tB + (i * 31 days));
@@ -667,7 +675,7 @@ contract EndToEndTest is Test {
         assertEq(uint256(engine.getState(noteB)), uint256(State.Settled), "noteB should settle at maturity");
 
         // --- Note C: KI at maturity (40% perf) ---
-        priceFeed.setPrice(FEED_B, 220e8); // 40% of 550
+        priceFeed.setPrice(FEED_B, 112e8); // 40% of 280 (TSLA)
         uint256 tC = block.timestamp;
         for (uint256 i = 0; i < 6; i++) {
             vm.warp(tC + (i * 31 days));
@@ -739,9 +747,8 @@ contract EndToEndTest is Test {
             });
             cre.setPricing(nId, pricing);
 
-            int256[] memory prices = new int256[](2);
-            prices[0] = 450e8;
-            prices[1] = 550e8;
+            int256[] memory prices = new int256[](3);
+            prices[0] = 130e8; prices[1] = 280e8; prices[2] = 580e8;
 
             vm.prank(keeper);
             engine.priceNote(nId, prices);
@@ -820,43 +827,28 @@ contract EndToEndTest is Test {
 
         usdc.mint(address(engine), depositAmount * 3);
 
-        // Obs 1 (observations=0 before trigger calc): trigger = 10000 - 200*0 = 10000 (100%)
-        // Set worst perf to exactly 99.99% (just below 100%) => no autocall
-        // 99% of 550e8 = 544.5e8 ≈ 544e8  (9980 bps perf)
-        // We need exactly < 10000 bps. 99% = 9900 bps. Let's use 99%.
-        // perf = currentPrice / initialPrice * BPS
-        // For FEED_B: perf = currentPrice / 550e8 * 10000
-        // We want perf = 9999 bps => currentPrice = 9999 * 550e8 / 10000 = 549.945e8
-        // But int192, so let's just set both feeds to just under initial.
-        // Actually, worst-of is min across basket. Both at 100% means min = 100%.
-        // At exactly 100% => autocall. So we need worst < 100%.
-        // Set FEED_A to 99% of 450e8 = 445.5e8 ~ 445e8 (perf = 445/450*10000 = 9888)
-        // That's below 100%, no autocall on obs 1.
-
-        // But for obs 2, trigger = 10000 - 200*1 = 9800 (98%).
-        // We want exactly 98%: perf = 9800. Set both at 98%.
-        // FEED_A at 98%: 450e8 * 98/100 = 441e8. perf = 441/450 * 10000 = 9800. Exact.
-        // FEED_B at 98%: 550e8 * 98/100 = 539e8. perf = 539/550 * 10000 = 9800. Exact.
-
-        // Obs 1: set to 99% of initial => perf = 9900, trigger = 10000 => no autocall
-        priceFeed.setPrice(FEED_A, int192(int256(450e8 * 99 / 100))); // 445.5e8 truncated to 445e8
-        priceFeed.setPrice(FEED_B, int192(int256(550e8 * 99 / 100))); // 544.5e8 truncated to 544e8
+        // Obs 1: trigger = 10000 (100%). Set worst perf to 99% => no autocall
+        // NVDA at 99%: 130e8 * 99/100 = 128.7e8
+        // TSLA at 99%: 280e8 * 99/100 = 277.2e8
+        // META at 99%: 580e8 * 99/100 = 574.2e8
+        priceFeed.setPrice(FEED_A, int192(int256(130e8 * 99 / 100)));
+        priceFeed.setPrice(FEED_B, int192(int256(280e8 * 99 / 100)));
+        priceFeed.setPrice(FEED_C, int192(int256(580e8 * 99 / 100)));
 
         vm.warp(block.timestamp + 31 days);
         engine.observe(noteId);
         assertEq(uint256(engine.getState(noteId)), uint256(State.Active), "obs1: no autocall at 99%");
 
-        // Verify obs count is now 1
         (,,,,uint8 obsCount,,,,) = engine.getNote(noteId);
         assertEq(obsCount, 1, "1 observation done");
 
-        // Obs 2: trigger = 10000 - 200*1 = 9800. Set perf to exactly 9800 bps (98%)
-        priceFeed.setPrice(FEED_A, int192(int256(uint256(450e8) * 9800 / 10000))); // 441e8
-        priceFeed.setPrice(FEED_B, int192(int256(uint256(550e8) * 9800 / 10000))); // 539e8
+        // Obs 2: trigger = 10000 - 200 = 9800 (98%). Set all to exactly 98% => autocall
+        priceFeed.setPrice(FEED_A, int192(int256(uint256(130e8) * 9800 / 10000)));
+        priceFeed.setPrice(FEED_B, int192(int256(uint256(280e8) * 9800 / 10000)));
+        priceFeed.setPrice(FEED_C, int192(int256(uint256(580e8) * 9800 / 10000)));
 
         vm.warp(block.timestamp + 31 days);
         engine.observe(noteId);
-        // perf = 9800 >= trigger 9800 => autocall
         assertEq(uint256(engine.getState(noteId)), uint256(State.Settled), "obs2: autocall at exactly 98%");
     }
 
@@ -874,11 +866,11 @@ contract EndToEndTest is Test {
         usdc.mint(address(engine), depositAmount * 5);
 
         // Obs 1-5: miss coupons (perf < 70% coupon barrier, > 50% KI)
-        // Set worst to 60%: FEED_B at 60% of 550e8 = 330e8
+        // Set worst to 60%: FEED_B (TSLA) at 60% of 280e8 = 168e8
         // Also keep FEED_B below autocall trigger with step-down:
         //   Obs 1 trigger=100%, Obs 2=98%, Obs 3=96%, Obs 4=94%, Obs 5=92%
         // 60% is well below all triggers, so no autocall. Also above 50% KI.
-        priceFeed.setPrice(FEED_B, 330e8); // 60% of 550e8
+        priceFeed.setPrice(FEED_B, 168e8); // 60% of 280e8 (TSLA)
 
         uint256 t = block.timestamp;
         for (uint256 i = 0; i < 5; i++) {
@@ -898,7 +890,7 @@ contract EndToEndTest is Test {
         // Then maturity check: perf >= 50% => NoKISettle => settle at par
         // Set perf to 80% (above coupon barrier 70%, but below autocall trigger)
         // Obs 6 trigger = 10000 - 200*5 = 9000 (90%). 80% < 90%, no autocall.
-        priceFeed.setPrice(FEED_B, 440e8); // 80% of 550e8
+        priceFeed.setPrice(FEED_B, 224e8); // 80% of 280e8 (TSLA)
 
         uint256 userBalBefore = usdc.balanceOf(user);
         vm.warp(t + (6 * 31 days));

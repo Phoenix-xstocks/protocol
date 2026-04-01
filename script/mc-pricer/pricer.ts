@@ -190,9 +190,9 @@ function runMonteCarlo(inputs: MCInputs): MCOutput {
 
 function main() {
   const inputs: MCInputs = {
-    spotPrices: [1.0, 1.0],
-    implVols: [0.30, 0.25],          // wQQQx ~30%, wSPYx ~25% implied vol
-    correlations: [0.80],             // QQQ/SPY correlation ~0.80
+    spotPrices: [1.0, 1.0, 1.0],
+    implVols: [0.55, 0.60, 0.40],    // NVDAx 55%, TSLAx 60%, METAx 40%
+    correlations: [0.55, 0.48, 0.52], // NVDA/TSLA, NVDA/META, TSLA/META
     kiBarrier: 0.5,
     couponBarrier: 0.7,
     autocallTrigger: 1.0,
@@ -205,7 +205,7 @@ function main() {
 
   console.log("Phoenix Autocall MC Pricer");
   console.log("=========================");
-  console.log(`Assets: ${inputs.implVols.length} (wQQQx, wSPYx)`);
+  console.log(`Assets: ${inputs.implVols.length} (NVDAx, TSLAx, METAx)`);
   console.log(`Vols: ${inputs.implVols.map((v) => (v * 100).toFixed(0) + "%").join(", ")}`);
   console.log(`Correlations: ${inputs.correlations.map((c) => c.toFixed(2)).join(", ")}`);
   console.log(`KI: ${(inputs.kiBarrier * 100).toFixed(0)}%, Autocall: ${(inputs.autocallTrigger * 100).toFixed(0)}%`);

@@ -47,8 +47,8 @@ contract Deploy is Script {
     address constant TYDRO_POOL = 0x6807dc923806fE8Fd134338EABCA509979a7e0cB; // Tydro Ink Sepolia xStocks
     address constant TESTNET_SWAP = 0x2fE68a36B08754c28Ca3334D863560A68EFe5a66; // TestnetSwap on Ink Sepolia
     address constant PYTH = 0x2880aB155794e7179c9eE2e38200202908C17B43; // Pyth on Ink Sepolia
-    // Chainlink CRE KeystoneForwarder on Ink Sepolia (production)
-    address constant CRE_FORWARDER = 0x76c9cf548b4179F8901cda1f8623568b58215E62;
+    // Chainlink CRE KeystoneForwarder on Ink Sepolia (simulation)
+    address constant CRE_FORWARDER = 0x6E9EE680ef59ef64Aa8C7371279c27E496b5eDc1;
 
     function run() external {
         uint256 deployerPk = vm.envUint("PRIVATE_KEY");

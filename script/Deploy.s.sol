@@ -44,7 +44,7 @@ contract Deploy is Script {
     // External protocol placeholders (to be updated with real addresses)
     address constant MOCK_NADO_PERP = address(0x1001);
     address constant TYDRO_POOL = 0x6807dc923806fE8Fd134338EABCA509979a7e0cB; // Tydro Ink Sepolia xStocks
-    address constant MOCK_1INCH_ROUTER = address(0x1003);
+    address constant TESTNET_SWAP = 0x2fE68a36B08754c28Ca3334D863560A68EFe5a66; // TestnetSwap on Ink Sepolia
     // Pyth on Ink Sepolia
     address constant PYTH = 0x2880aB155794e7179c9eE2e38200202908C17B43;
 
@@ -78,8 +78,10 @@ contract Deploy is Script {
         TydroAdapter tydro = new TydroAdapter(TYDRO_POOL, USDC, deployer);
         console.log("TydroAdapter:", address(tydro));
 
-        OneInchSwapper swapper = new OneInchSwapper(MOCK_1INCH_ROUTER, deployer);
-        console.log("OneInchSwapper:", address(swapper));
+        // Use TestnetSwap (already deployed, implements IOneInchSwapper)
+        // address swapperAddr = TESTNET_SWAP;
+        OneInchSwapper swapper = new OneInchSwapper(TESTNET_SWAP, deployer);
+        console.log("Swapper (via TestnetSwap):", address(swapper));
 
         PythAdapter priceFeed = new PythAdapter(PYTH, deployer);
         console.log("PythAdapter:", address(priceFeed));

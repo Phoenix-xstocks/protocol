@@ -175,9 +175,9 @@ contract VolOracle is IVolOracle, IReceiver, ERC165, AccessControl {
     function _pairKey(address a, address b) internal pure returns (bytes32 result) {
         (address lo, address hi) = a < b ? (a, b) : (b, a);
         assembly {
-            mstore(0x00, lo)
-            mstore(0x20, hi)
-            result := keccak256(0x0c, 40)
+            mstore(0x00, shl(96, lo))
+            mstore(0x14, shl(96, hi))
+            result := keccak256(0x00, 40)
         }
     }
 

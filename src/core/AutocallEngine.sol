@@ -13,6 +13,7 @@ import { IIssuanceGate } from "../interfaces/IIssuanceGate.sol";
 import { ICouponCalculator } from "../interfaces/ICouponCalculator.sol";
 import { IVolOracle } from "../interfaces/IVolOracle.sol";
 import { ICarryEngine } from "../interfaces/ICarryEngine.sol";
+import { ISablierStream } from "../interfaces/ISablierStream.sol";
 import { NoteToken } from "./NoteToken.sol";
 
 /// @notice Minimal interface for reading latest verified prices.
@@ -82,6 +83,9 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     ICarryEngine public immutable carryEngine;
     NoteToken public immutable noteToken;
 
+    /// @notice Sablier coupon streaming adapter (set post-deploy, optional)
+    ISablierStream public sablierStream;
+
     /// @notice Maps xStock token address -> Pyth/Chainlink feed ID
     mapping(address => bytes32) public feedIds;
 
@@ -92,6 +96,11 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         testnetMode = _testnet;
     }
 
+    /// @notice Set the Sablier coupon streaming adapter. Admin only.
+    function setSablierStream(address _sablierStream) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        sablierStream = ISablierStream(_sablierStream);
+    }
+
     // ----------------------------------------------------------------
     // Events
     // ----------------------------------------------------------------
@@ -100,6 +109,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     event NoteStateChanged(bytes32 indexed noteId, State from, State to);
     event CouponPaid(bytes32 indexed noteId, uint256 amount, uint256 memoryPaid);
     event CouponMissed(bytes32 indexed noteId, uint256 memoryAccumulated);
+    event CouponStreamed(bytes32 indexed noteId, uint256 streamId, uint256 amount);
     event NoteAutocalled(bytes32 indexed noteId, uint8 observation);
     event NoteSettled(bytes32 indexed noteId, uint256 payout, bool kiPhysical);
     event EmergencyPaused(bytes32 indexed noteId);
@@ -373,6 +383,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         _requireState(noteId, State.KISettle);
         if (msg.sender != note.holder) revert OnlyHolder();
 
+        _cancelAllNoteStreams(noteId);
         uint256 recovered = hedgeManager.closeHedge(noteId);
         uint256 worstPerfBps = _getWorstPerformance(note);
 
@@ -400,6 +411,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
             "KI settle deadline not reached"
         );
 
+        _cancelAllNoteStreams(noteId);
         uint256 recovered = hedgeManager.closeHedge(noteId);
         uint256 worstPerfBps = _getWorstPerformance(note);
         uint256 cashValue = (note.notional * worstPerfBps) / BPS;
@@ -579,15 +591,41 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
             note.memoryCoupon = 0;
         }
 
-        uint256 totalPay = couponAmount + memoryPaid;
-        if (totalPay > 0) {
-            usdc.safeTransfer(note.holder, totalPay);
+        // Pay memory coupon directly (lump sum — these are past-due amounts)
+        if (memoryPaid > 0) {
+            usdc.safeTransfer(note.holder, memoryPaid);
+        }
+
+        // Stream current coupon via Sablier (if configured), else direct transfer
+        if (couponAmount > 0) {
+            if (address(sablierStream) != address(0)) {
+                usdc.forceApprove(address(sablierStream), couponAmount);
+                uint256 streamId = sablierStream.startCouponStream(
+                    noteId,
+                    note.holder,
+                    couponAmount,
+                    block.timestamp,
+                    block.timestamp + (OBS_INTERVAL_DAYS * 1 days)
+                );
+                emit CouponStreamed(noteId, streamId, couponAmount);
+            } else {
+                usdc.safeTransfer(note.holder, couponAmount);
+            }
         }
 
         emit CouponPaid(noteId, couponAmount, memoryPaid);
     }
 
+    /// @notice Cancel all active Sablier streams for a note on settlement.
+    ///         Refunded USDC stays in SablierStream and can be recovered by admin.
+    function _cancelAllNoteStreams(bytes32 noteId) internal {
+        if (address(sablierStream) != address(0)) {
+            sablierStream.cancelAllNoteStreams(noteId);
+        }
+    }
+
     function _settleAutocall(bytes32 noteId, Note storage note) internal {
+        _cancelAllNoteStreams(noteId);
         uint256 recovered = hedgeManager.closeHedge(noteId);
         uint256 payout = note.notional < recovered ? note.notional : recovered;
         usdc.safeTransfer(note.holder, payout);
@@ -610,6 +648,8 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     }
 
     function _settleNoKI(bytes32 noteId, Note storage note) internal {
+        _cancelAllNoteStreams(noteId);
+
         // Pay out any accumulated memory coupons before settling
         if (note.memoryCoupon > 0) {
             uint256 memoryPaid = note.memoryCoupon;

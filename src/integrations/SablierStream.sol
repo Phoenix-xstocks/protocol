@@ -2,69 +2,81 @@
 pragma solidity ^0.8.24;
 
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ISablierStream } from "../interfaces/ISablierStream.sol";
 
-/// @notice Minimal interface for Sablier V2 LockupLinear operations.
-interface ISablierLockupMinimal {
-    struct Timestamps {
-        uint40 start;
-        uint40 end;
-    }
-
-    struct CreateWithTimestamps {
-        address sender;
-        address recipient;
-        uint128 depositAmount;
-        IERC20 token;
-        bool cancelable;
-        bool transferable;
-        Timestamps timestamps;
-        string shape;
-    }
-
-    struct UnlockAmounts {
-        uint128 start;
-        uint128 cliff;
-    }
-
-    function createWithTimestampsLL(
-        CreateWithTimestamps calldata params,
-        UnlockAmounts calldata unlockAmounts,
-        uint40 granularity,
-        uint40 cliffTime
-    ) external payable returns (uint256 streamId);
-
-    function cancel(uint256 streamId) external payable returns (uint128 refundedAmount);
-
-    function streamedAmountOf(uint256 streamId) external view returns (uint128 streamedAmount);
-}
-
-/// @title SablierStream
-/// @notice Coupon streaming via Sablier V2 LockupLinear. Creates real-time coupon streams for note holders.
-contract SablierStream is ISablierStream, Ownable {
+/// @title CouponStreamer
+/// @notice Self-contained linear token streaming for coupon payments.
+///         Replaces external Sablier V2 (not deployed on Ink). Each stream
+///         linearly vests USDC from startTime to endTime. Holders call withdraw()
+///         to claim; the owner (AutocallEngine) can cancel, returning unvested USDC.
+contract CouponStreamer is ISablierStream, Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    ISablierLockupMinimal public immutable sablier;
+    /// @notice Max streams per note (6 observations + safety margin)
+    uint256 public constant MAX_STREAMS_PER_NOTE = 12;
+
+    // ----------------------------------------------------------------
+    // Types
+    // ----------------------------------------------------------------
+
+    struct Stream {
+        address recipient;  // 20 bytes ┐
+        bool canceled;      //  1 byte  │ slot 0 (31 bytes)
+        uint40 startTime;   //  5 bytes │
+        uint40 endTime;     //  5 bytes ┘
+        uint128 deposit;    // 16 bytes ┐ slot 1 (32 bytes)
+        uint128 withdrawn;  // 16 bytes ┘
+    }
+
+    // ----------------------------------------------------------------
+    // Storage
+    // ----------------------------------------------------------------
+
     IERC20 public immutable usdc;
 
-    mapping(bytes32 => uint256[]) public noteStreamIds;
+    uint256 public nextStreamId;
+    mapping(uint256 => Stream) public streams;
+    mapping(bytes32 => uint256[]) internal _noteStreamIds;
     mapping(uint256 => bytes32) public streamToNote;
 
-    event CouponStreamStarted(bytes32 indexed noteId, address indexed holder, uint256 streamId, uint256 monthlyAmount);
-    event CouponStreamCancelled(uint256 indexed streamId);
+    // ----------------------------------------------------------------
+    // Events
+    // ----------------------------------------------------------------
+
+    event CouponStreamStarted(bytes32 indexed noteId, address indexed holder, uint256 streamId, uint256 amount);
+    event CouponStreamCancelled(bytes32 indexed noteId, uint256 indexed streamId, uint256 refundedAmount);
+    event CouponWithdrawn(uint256 indexed streamId, address indexed recipient, uint256 amount);
+
+    // ----------------------------------------------------------------
+    // Errors
+    // ----------------------------------------------------------------
 
     error InvalidTimeRange();
     error ZeroAmount();
     error StreamNotFound(uint256 streamId);
+    error StreamAlreadyCanceled(uint256 streamId);
+    error NotRecipient();
+    error NothingToWithdraw();
+    error TooManyStreams(bytes32 noteId);
 
-    constructor(address _sablier, address _usdc, address _owner) Ownable(_owner) {
-        sablier = ISablierLockupMinimal(_sablier);
+    // ----------------------------------------------------------------
+    // Constructor
+    // ----------------------------------------------------------------
+
+    constructor(address _usdc, address _owner) Ownable(_owner) {
         usdc = IERC20(_usdc);
+        nextStreamId = 1; // stream IDs start at 1 (0 = invalid)
     }
 
+    // ----------------------------------------------------------------
+    // Owner functions (called by AutocallEngine)
+    // ----------------------------------------------------------------
+
     /// @inheritdoc ISablierStream
+    /// @dev Caller must approve this contract for `monthlyAmount` of USDC before calling.
     function startCouponStream(
         bytes32 noteId,
         address holder,
@@ -74,26 +86,23 @@ contract SablierStream is ISablierStream, Ownable {
     ) external onlyOwner returns (uint256 streamId) {
         if (endTime <= startTime) revert InvalidTimeRange();
         if (monthlyAmount == 0) revert ZeroAmount();
+        if (_noteStreamIds[noteId].length >= MAX_STREAMS_PER_NOTE) revert TooManyStreams(noteId);
 
-        usdc.forceApprove(address(sablier), monthlyAmount);
+        // Pull USDC from caller (AutocallEngine)
+        usdc.safeTransferFrom(msg.sender, address(this), monthlyAmount);
 
-        ISablierLockupMinimal.CreateWithTimestamps memory params = ISablierLockupMinimal.CreateWithTimestamps({
-            sender: address(this),
+        streamId = nextStreamId++;
+
+        streams[streamId] = Stream({
             recipient: holder,
-            depositAmount: uint128(monthlyAmount),
-            token: usdc,
-            cancelable: true,
-            transferable: false,
-            timestamps: ISablierLockupMinimal.Timestamps({ start: uint40(startTime), end: uint40(endTime) }),
-            shape: ""
+            canceled: false,
+            startTime: uint40(startTime),
+            endTime: uint40(endTime),
+            deposit: uint128(monthlyAmount),
+            withdrawn: 0
         });
 
-        ISablierLockupMinimal.UnlockAmounts memory unlockAmounts =
-            ISablierLockupMinimal.UnlockAmounts({ start: 0, cliff: 0 });
-
-        streamId = sablier.createWithTimestampsLL(params, unlockAmounts, 0, 0);
-
-        noteStreamIds[noteId].push(streamId);
+        _noteStreamIds[noteId].push(streamId);
         streamToNote[streamId] = noteId;
 
         emit CouponStreamStarted(noteId, holder, streamId, monthlyAmount);
@@ -104,23 +113,111 @@ contract SablierStream is ISablierStream, Ownable {
         bytes32 noteId = streamToNote[streamId];
         if (noteId == bytes32(0)) revert StreamNotFound(streamId);
 
-        sablier.cancel(streamId);
+        Stream storage s = streams[streamId];
+        if (s.canceled) revert StreamAlreadyCanceled(streamId);
 
-        emit CouponStreamCancelled(streamId);
+        s.canceled = true;
+
+        uint256 vested = _vestedAmount(s);
+        // Holder keeps max(vested, already withdrawn). Refund the rest.
+        uint256 owed = vested > s.withdrawn ? vested : uint256(s.withdrawn);
+        uint256 refunded = uint256(s.deposit) - owed;
+
+        if (refunded > 0) {
+            usdc.safeTransfer(msg.sender, refunded);
+        }
+
+        emit CouponStreamCancelled(noteId, streamId, refunded);
     }
 
     /// @inheritdoc ISablierStream
-    function getStreamedAmount(uint256 streamId) external view returns (uint256) {
-        return uint256(sablier.streamedAmountOf(streamId));
+    function cancelAllNoteStreams(bytes32 noteId) external onlyOwner returns (uint256 totalRefunded) {
+        uint256[] storage ids = _noteStreamIds[noteId];
+        for (uint256 i = 0; i < ids.length; i++) {
+            Stream storage s = streams[ids[i]];
+            if (s.canceled) continue;
+
+            s.canceled = true;
+
+            uint256 vested = _vestedAmount(s);
+            uint256 owed = vested > s.withdrawn ? vested : uint256(s.withdrawn);
+            uint256 refunded = uint256(s.deposit) - owed;
+
+            totalRefunded += refunded;
+            emit CouponStreamCancelled(noteId, ids[i], refunded);
+        }
+
+        if (totalRefunded > 0) {
+            usdc.safeTransfer(msg.sender, totalRefunded);
+        }
     }
 
-    /// @notice Get all stream IDs for a note.
-    function getNoteStreams(bytes32 noteId) external view returns (uint256[] memory) {
-        return noteStreamIds[noteId];
+    // ----------------------------------------------------------------
+    // Holder functions
+    // ----------------------------------------------------------------
+
+    /// @notice Withdraw vested USDC from a stream.
+    function withdraw(uint256 streamId) external nonReentrant {
+        Stream storage s = streams[streamId];
+        if (msg.sender != s.recipient) revert NotRecipient();
+
+        uint256 vested = _vestedAmount(s);
+        uint256 withdrawable = vested - uint256(s.withdrawn);
+        if (withdrawable == 0) revert NothingToWithdraw();
+
+        s.withdrawn += uint128(withdrawable);
+        usdc.safeTransfer(msg.sender, withdrawable);
+
+        emit CouponWithdrawn(streamId, msg.sender, withdrawable);
     }
+
+    // ----------------------------------------------------------------
+    // View functions
+    // ----------------------------------------------------------------
+
+    /// @inheritdoc ISablierStream
+    function getStreamedAmount(uint256 streamId) external view returns (uint256) {
+        return _vestedAmount(streams[streamId]);
+    }
+
+    /// @inheritdoc ISablierStream
+    function getNoteStreams(bytes32 noteId) external view returns (uint256[] memory) {
+        return _noteStreamIds[noteId];
+    }
+
+    /// @notice Get full stream details.
+    function getStream(uint256 streamId)
+        external
+        view
+        returns (address recipient, uint128 deposit, uint40 startTime, uint40 endTime, uint128 withdrawn, bool canceled)
+    {
+        Stream storage s = streams[streamId];
+        return (s.recipient, s.deposit, s.startTime, s.endTime, s.withdrawn, s.canceled);
+    }
+
+    /// @notice Get the amount a holder can withdraw right now.
+    function getWithdrawable(uint256 streamId) external view returns (uint256) {
+        Stream storage s = streams[streamId];
+        return _vestedAmount(s) - uint256(s.withdrawn);
+    }
+
+    // ----------------------------------------------------------------
+    // Admin
+    // ----------------------------------------------------------------
 
     /// @notice Recover tokens sent to this contract by mistake.
     function recoverToken(address token, uint256 amount) external onlyOwner {
         IERC20(token).safeTransfer(msg.sender, amount);
+    }
+
+    // ----------------------------------------------------------------
+    // Internal
+    // ----------------------------------------------------------------
+
+    /// @dev Linear vesting: deposit * elapsed / duration, clamped to [0, deposit].
+    function _vestedAmount(Stream storage s) internal view returns (uint256) {
+        if (block.timestamp <= s.startTime) return 0;
+        if (block.timestamp >= s.endTime) return uint256(s.deposit);
+        return (uint256(s.deposit) * (block.timestamp - s.startTime)) / (s.endTime - s.startTime);
     }
 }

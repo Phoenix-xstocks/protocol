@@ -61,7 +61,7 @@ contract Deploy is Script {
         vm.startBroadcast(deployerPk);
 
         // ---- 1. Pricing layer (no protocol deps) ----
-        VolOracle volOracle = new VolOracle(deployer);
+        VolOracle volOracle = new VolOracle(deployer, CRE_FORWARDER);
         console.log("VolOracle:", address(volOracle));
 
         OptionPricer optionPricer = new OptionPricer(address(volOracle), deployer);

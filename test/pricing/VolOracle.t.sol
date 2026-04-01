@@ -17,7 +17,7 @@ contract VolOracleTest is Test {
     address constant AAPL = address(0x4);
 
     function setUp() public {
-        oracle = new VolOracle(owner);
+        oracle = new VolOracle(owner, address(0xF0F0));
         oracle.grantRole(oracle.UPDATER_ROLE(), updater);
     }
 

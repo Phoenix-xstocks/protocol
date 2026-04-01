@@ -6,6 +6,7 @@ import { AutocallEngine, IPriceFeed } from "../../src/core/AutocallEngine.sol";
 import { State } from "../../src/interfaces/IAutocallEngine.sol";
 import { IHedgeManager } from "../../src/interfaces/IHedgeManager.sol";
 import { ICREConsumer, PricingResult } from "../../src/interfaces/ICREConsumer.sol";
+import { PricingParams } from "../../src/interfaces/IOptionPricer.sol";
 import { IIssuanceGate } from "../../src/interfaces/IIssuanceGate.sol";
 import { ICouponCalculator } from "../../src/interfaces/ICouponCalculator.sol";
 import { IVolOracle } from "../../src/interfaces/IVolOracle.sol";
@@ -61,6 +62,8 @@ contract MockCREConsumer is ICREConsumer {
         require(accepted[noteId], "pricing not accepted");
         return results[noteId];
     }
+
+    function registerNoteParams(bytes32, PricingParams calldata) external override {}
 }
 
 contract MockIssuanceGate is IIssuanceGate {

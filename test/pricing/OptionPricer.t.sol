@@ -18,7 +18,7 @@ contract OptionPricerTest is Test {
     address constant META = address(0x3);
 
     function setUp() public {
-        volOracle = new VolOracle(owner);
+        volOracle = new VolOracle(owner, address(0xF0F0));
         volOracle.grantRole(volOracle.UPDATER_ROLE(), updater);
         pricer = new OptionPricer(address(volOracle), owner);
 
@@ -129,7 +129,7 @@ contract OptionPricerTest is Test {
     }
 
     function test_setVolOracle() public {
-        VolOracle newOracle = new VolOracle(owner);
+        VolOracle newOracle = new VolOracle(owner, address(0xF0F0));
         pricer.setVolOracle(address(newOracle));
         assertEq(address(pricer.volOracle()), address(newOracle));
     }

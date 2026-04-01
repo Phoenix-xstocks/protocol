@@ -25,6 +25,9 @@ contract CREConsumer is ICREConsumer, IReceiver, ERC165, Ownable {
     address public forwarder;
     IOptionPricer public optionPricer;
 
+    /// @notice AutocallEngine address — allowed to register note params on createNote().
+    address public autocallEngine;
+
     /// @notice Optional: restrict to a specific CRE workflow owner address.
     address public expectedWorkflowOwner;
 
@@ -36,6 +39,7 @@ contract CREConsumer is ICREConsumer, IReceiver, ERC165, Ownable {
     event PricingAccepted(bytes32 indexed noteId, uint16 putPremiumBps, uint16 kiProbabilityBps);
     event NoteParamsRegistered(bytes32 indexed noteId);
     event ForwarderUpdated(address indexed newForwarder);
+    event AutocallEngineUpdated(address indexed newEngine);
 
     constructor(address _forwarder, address _optionPricer, address _owner) Ownable(_owner) {
         require(_forwarder != address(0), "zero forwarder");
@@ -82,7 +86,8 @@ contract CREConsumer is ICREConsumer, IReceiver, ERC165, Ownable {
     // Note params registration (owner)
     // ---------------------------------------------------------------
 
-    function registerNoteParams(bytes32 noteId, PricingParams calldata params) external onlyOwner {
+    function registerNoteParams(bytes32 noteId, PricingParams calldata params) external {
+        require(msg.sender == owner() || msg.sender == autocallEngine, "not authorized");
         require(!hasNoteParams[noteId], "already registered");
         noteParams[noteId] = params;
         hasNoteParams[noteId] = true;
@@ -108,6 +113,13 @@ contract CREConsumer is ICREConsumer, IReceiver, ERC165, Ownable {
     function setOptionPricer(address _optionPricer) external onlyOwner {
         require(_optionPricer != address(0), "zero address");
         optionPricer = IOptionPricer(_optionPricer);
+    }
+
+    /// @notice Set the AutocallEngine address allowed to register note params.
+    function setAutocallEngine(address _engine) external onlyOwner {
+        require(_engine != address(0), "zero address");
+        autocallEngine = _engine;
+        emit AutocallEngineUpdated(_engine);
     }
 
     // ---------------------------------------------------------------

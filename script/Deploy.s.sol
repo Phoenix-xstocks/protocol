@@ -45,7 +45,7 @@ contract Deploy is Script {
     // External protocols
     address constant MOCK_NADO_PERP = address(0x1001); // Nado not on Ink testnet — skipped via testnetMode
     address constant TYDRO_POOL = 0x6807dc923806fE8Fd134338EABCA509979a7e0cB; // Tydro Ink Sepolia xStocks
-    address constant TESTNET_SWAP = 0x2fE68a36B08754c28Ca3334D863560A68EFe5a66; // TestnetSwap on Ink Sepolia
+    address constant TESTNET_SWAP = 0x10415db61BC994f00028B6Cc1bddc04c76bd0fB4; // TestnetSwap on Ink Sepolia
     address constant PYTH = 0x2880aB155794e7179c9eE2e38200202908C17B43; // Pyth on Ink Sepolia
     // Chainlink CRE KeystoneForwarder on Ink Sepolia (production)
     address constant CRE_FORWARDER = 0x76c9cf548b4179F8901cda1f8623568b58215E62;
@@ -153,6 +153,9 @@ contract Deploy is Script {
 
         // VolOracle: deployer can update vols
         volOracle.grantRole(volOracle.UPDATER_ROLE(), deployer);
+
+        // CREConsumer: engine needs to call registerNoteParams
+        creConsumer.setAutocallEngine(address(engine));
 
         // IssuanceGate: engine needs to call noteActivated/noteSettled
         issuanceGate.setAuthorized(address(engine), true);

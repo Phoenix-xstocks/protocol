@@ -15,6 +15,7 @@ interface IAToken {
 /// @notice Minimal interface for Tydro (Aave v3 fork) on Ink.
 interface ITydroPool {
     function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode) external;
+    function setUserUseReserveAsCollateral(address asset, bool useAsCollateral) external;
     function withdraw(address asset, uint256 amount, address to) external returns (uint256);
     function borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf)
         external;
@@ -85,6 +86,7 @@ contract TydroAdapter is ITydroAdapter, Ownable, ReentrancyGuard {
         IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
         IERC20(asset).forceApprove(address(tydroPool), amount);
         tydroPool.supply(asset, amount, address(this), 0);
+        tydroPool.setUserUseReserveAsCollateral(asset, true);
         emit CollateralDeposited(asset, amount);
     }
 

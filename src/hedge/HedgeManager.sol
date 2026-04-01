@@ -98,6 +98,12 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
         usdc = IERC20(_usdc);
     }
 
+    /// @notice Update the swapper (DEX) used for spot trades
+    function setSwapper(address _swapper) external onlyOwner {
+        require(_swapper != address(0), "zero swapper");
+        swapper = IOneInchSwapper(_swapper);
+    }
+
     /// @notice Set pair index for a given xStock asset
     function setPairIndex(address asset, uint256 pairIndex) external onlyOwner {
         pairIndexes[asset] = pairIndex;

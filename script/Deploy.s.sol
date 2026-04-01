@@ -23,6 +23,7 @@ import { CarryEngine } from "../src/hedge/CarryEngine.sol";
 import { NadoAdapter } from "../src/integrations/NadoAdapter.sol";
 import { TydroAdapter } from "../src/integrations/TydroAdapter.sol";
 import { OneInchSwapper } from "../src/integrations/OneInchSwapper.sol";
+import { IOneInchSwapper } from "../src/interfaces/IOneInchSwapper.sol";
 import { PythAdapter } from "../src/integrations/PythAdapter.sol";
 
 // Periphery
@@ -78,10 +79,9 @@ contract Deploy is Script {
         TydroAdapter tydro = new TydroAdapter(TYDRO_POOL, USDC, deployer);
         console.log("TydroAdapter:", address(tydro));
 
-        // Use TestnetSwap (already deployed, implements IOneInchSwapper)
-        // address swapperAddr = TESTNET_SWAP;
-        OneInchSwapper swapper = new OneInchSwapper(TESTNET_SWAP, deployer);
-        console.log("Swapper (via TestnetSwap):", address(swapper));
+        // Use TestnetSwap directly (implements IOneInchSwapper)
+        IOneInchSwapper swapper = IOneInchSwapper(TESTNET_SWAP);
+        console.log("Swapper (TestnetSwap):", address(swapper));
 
         PythAdapter priceFeed = new PythAdapter(PYTH, deployer);
         console.log("PythAdapter:", address(priceFeed));
@@ -155,6 +155,12 @@ contract Deploy is Script {
 
         // HedgeManager: engine needs to call openHedge/closeHedge
         hedgeManager.setAuthorized(address(engine), true);
+        hedgeManager.setTestnetMode(true); // skip Nado perps on testnet
+        engine.setTestnetMode(true); // skip CRE check in issuance gate
+
+        // Transfer adapter ownership to HedgeManager (it calls them directly)
+        tydro.transferOwnership(address(hedgeManager));
+        nado.transferOwnership(address(hedgeManager));
 
         // Transfer reserve ownership to epoch manager
         reserveFund.transferOwnership(address(epochManager));

@@ -30,6 +30,9 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
     /// @notice Authorized callers (AutocallEngine, EpochManager, etc.)
     mapping(address => bool) public authorized;
 
+    /// @notice Testnet mode: skip Nado perp operations (no perp DEX on testnet)
+    bool public testnetMode;
+
     modifier onlyAuthorized() {
         require(msg.sender == owner() || authorized[msg.sender], "not authorized");
         _;
@@ -37,6 +40,10 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
 
     function setAuthorized(address account, bool status) external onlyOwner {
         authorized[account] = status;
+    }
+
+    function setTestnetMode(bool _testnet) external onlyOwner {
+        testnetMode = _testnet;
     }
 
     struct StockHedge {
@@ -117,7 +124,7 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
         uint256 totalSpot;
 
         for (uint256 i = 0; i < basket.length; i++) {
-            // 1. Buy xStocks spot via 1inch
+            // 1. Buy xStocks spot via swap
             usdc.safeIncreaseAllowance(address(swapper), perStock);
             uint256 xStockAmount = swapper.swap(address(usdc), basket[i], perStock);
 
@@ -125,9 +132,12 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
             IERC20(basket[i]).safeIncreaseAllowance(address(tydro), xStockAmount);
             tydro.depositCollateral(basket[i], xStockAmount);
 
-            // 3. Short stock perps on Nado (delta hedge)
+            // 3. Short stock perps on Nado (skip in testnet mode)
+            bytes32 positionId;
             uint256 pairIdx = pairIndexes[basket[i]];
-            bytes32 positionId = nado.openShort(pairIdx, perStock, DEFAULT_LEVERAGE);
+            if (!testnetMode) {
+                positionId = nado.openShort(pairIdx, perStock, DEFAULT_LEVERAGE);
+            }
 
             pos.stocks[i] = StockHedge({
                 asset: basket[i],
@@ -153,10 +163,12 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
         HedgePosition storage pos = positions[noteId];
         require(pos.active, "hedge not active");
 
-        // 1. Close all short perps on Nado
-        for (uint256 i = 0; i < pos.stockCount; i++) {
-            StockHedge storage sh = pos.stocks[i];
-            nado.closeShort(sh.positionId);
+        // 1. Close all short perps on Nado (skip in testnet mode)
+        if (!testnetMode) {
+            for (uint256 i = 0; i < pos.stockCount; i++) {
+                StockHedge storage sh = pos.stocks[i];
+                nado.closeShort(sh.positionId);
+            }
         }
 
         // 2. Repay Tydro borrow
@@ -240,8 +252,12 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
         for (uint256 i = 0; i < pos.stockCount; i++) {
             StockHedge storage sh = pos.stocks[i];
             spotValue += tydro.getCollateralValue(sh.asset);
-            (, , uint256 size, ) = nado.getPosition(sh.positionId);
-            perpValue += size;
+            if (!testnetMode) {
+                (, , uint256 size, ) = nado.getPosition(sh.positionId);
+                perpValue += size;
+            } else {
+                perpValue += sh.perpNotional; // use stored notional in testnet
+            }
         }
 
         if (spotValue >= perpValue) {
@@ -265,9 +281,11 @@ contract HedgeManager is IHedgeManager, Ownable, ReentrancyGuard {
                 ? spotVal - sh.perpNotional
                 : sh.perpNotional - spotVal;
             if (diff * BPS / (sh.perpNotional > 0 ? sh.perpNotional : 1) > 200) {
-                nado.closeShort(sh.positionId);
-                bytes32 newPosId = nado.openShort(sh.pairIndex, spotVal, DEFAULT_LEVERAGE);
-                sh.positionId = newPosId;
+                if (!testnetMode) {
+                    nado.closeShort(sh.positionId);
+                    bytes32 newPosId = nado.openShort(sh.pairIndex, spotVal, DEFAULT_LEVERAGE);
+                    sh.positionId = newPosId;
+                }
                 sh.perpNotional = spotVal;
             }
         }

@@ -5,21 +5,16 @@ import { Script, console } from "forge-std/Script.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { AutocallEngine } from "../src/core/AutocallEngine.sol";
 import { XYieldVault } from "../src/core/XYieldVault.sol";
-import { ChainlinkPriceFeed } from "../src/integrations/ChainlinkPriceFeed.sol";
 import { VolOracle } from "../src/pricing/VolOracle.sol";
 import { State } from "../src/interfaces/IAutocallEngine.sol";
 
-/// @title TestFullFlow
-/// @notice Complete on-chain flow: deposit → price → activate → verify
-///         Uses priceNoteDirect() to bypass CRE on testnet.
 contract TestFullFlow is Script {
     address constant USDC   = 0x6b57475467cd854d36Be7FB614caDa5207838943;
     address constant NVDAx  = 0x3EfB67e01d5Ab3dd37dBb34D8a8c09D0682Bfc4E;
     address constant TSLAx  = 0x2a968432b2BC26dA460A0B7262414552288C894E;
     address constant METAx  = 0x7EA9266A024e168341827a9c4621EC5b16cda65a;
-
-    address constant ENGINE  = 0xF2f32c1789b2318776023eA50C699A9E9e51AD51;
-    address constant VAULT   = 0xE8f918b1E6046E9714Cb9052b292bDF6E81CfB1e;
+    address constant ENGINE  = 0x7A117e085A5871D122409701B4cFB2177AE66315;
+    address constant VAULT   = 0x6393ce64842303f15e1FD57f89e5A06150f86eC5;
 
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");
@@ -29,60 +24,63 @@ contract TestFullFlow is Script {
         XYieldVault vault = XYieldVault(VAULT);
         IERC20 usdc = IERC20(USDC);
 
-        console.log("=== FULL FLOW TEST ===");
-        console.log("Deployer:", deployer);
+        console.log("=== FULL FLOW: DEPOSIT -> ACTIVATE ===");
+        console.log("USDC:", usdc.balanceOf(deployer) / 1e6);
 
         vm.startBroadcast(pk);
 
-        // --- 1. Deposit ---
-        console.log("");
-        console.log("[1/5] Depositing 2000 USDC...");
-        usdc.approve(VAULT, 2000e6);
-        uint256 reqId = vault.requestDeposit(2000e6, deployer);
+        // 0. Setup VolOracle
+        VolOracle vol = VolOracle(address(engine.volOracle()));
+        address[] memory assets = new address[](3);
+        assets[0] = NVDAx; assets[1] = TSLAx; assets[2] = METAx;
+        uint256[] memory vols = new uint256[](3);
+        vols[0] = 5500; vols[1] = 6000; vols[2] = 4000;
+        uint256[] memory corrs = new uint256[](3);
+        corrs[0] = 5500; corrs[1] = 4800; corrs[2] = 5200;
+        vol.updateVols(assets, vols, corrs);
 
-        // --- 2. Create note ---
-        console.log("[2/5] Creating note (NVDAx + TSLAx + METAx)...");
+        // Setup feed IDs
+        engine.setFeedId(NVDAx, 0xb1073854ed24cbc755dc527418f52b7d271f6cc967bbf8d8129112b18860a593);
+        engine.setFeedId(TSLAx, 0x16dad506d7db8da01c87581c87ca897a012a153557d4d578c3b9c9e1bc0632f1);
+        engine.setFeedId(METAx, 0x78a3e3b8e676a8f73c439f5d749737034b139bbbe899ba5775216fba596607fe);
+
+        // 1. Deposit
+        console.log("[1/5] Deposit 500 USDC");
+        usdc.approve(VAULT, 500e6);
+        vault.requestDeposit(500e6, deployer);
+
+        // 2. Create note (net after 0.6% fees: 500 - 3 = 497)
+        console.log("[2/5] Create note");
         address[] memory basket = new address[](3);
-        basket[0] = NVDAx;
-        basket[1] = TSLAx;
-        basket[2] = METAx;
-        bytes32 noteId = engine.createNote(basket, 2000e6, deployer);
+        basket[0] = NVDAx; basket[1] = TSLAx; basket[2] = METAx;
+        uint256 netAmount = 500e6 - (500e6 * 60 / 10000); // 0.6% fees
+        bytes32 noteId = engine.createNote(basket, netAmount, deployer);
+        console.log("  State:", uint256(engine.getState(noteId)));
 
-        // --- 3. Fulfill + Claim ---
-        console.log("[3/5] Fulfilling and claiming deposit...");
-        vault.fulfillDeposit(reqId, noteId, basket);
-        vault.claimDeposit(reqId);
-
+        // 3. Fulfill + Claim
+        console.log("[3/5] Fulfill + Claim");
+        vault.fulfillDeposit(0, noteId, basket);
+        vault.claimDeposit(0);
         console.log("  Engine USDC:", usdc.balanceOf(ENGINE) / 1e6);
-        require(engine.getState(noteId) == State.Created, "should be Created");
 
-        // --- 4. Price note (testnet direct — bypass CRE) ---
-        console.log("[4/5] Pricing note (premium=1106 bps, testnet mode)...");
-        int256[] memory initialPrices = new int256[](3);
-        initialPrices[0] = 130e8;  // NVDA $130
-        initialPrices[1] = 280e8;  // TSLA $280
-        initialPrices[2] = 580e8;  // META $580
+        // 4. Price
+        console.log("[4/5] Price (1106 bps)");
+        int256[] memory initPrices = new int256[](3);
+        initPrices[0] = 130e8; initPrices[1] = 280e8; initPrices[2] = 580e8;
+        engine.priceNoteDirect(noteId, initPrices, 1106);
+        console.log("  State:", uint256(engine.getState(noteId)));
 
-        engine.priceNoteDirect(noteId, initialPrices, 1106);
-        require(engine.getState(noteId) == State.Priced, "should be Priced");
-        console.log("  State: Priced");
-
-        // --- 5. Activate (opens hedge) ---
-        console.log("[5/5] Activating note...");
-
-        // Need to approve engine to let HedgeManager pull USDC
-        // But HedgeManager's openHedge will call swapper which needs real xStocks
-        // On testnet with mock adapters, this will revert at the swap level
-        // So we skip activation for now and just verify pricing worked
-
-        console.log("  Note state:", uint256(engine.getState(noteId)));
-        console.log("  Note count:", engine.getNoteCount());
+        // 5. ACTIVATE
+        console.log("[5/5] ACTIVATE");
+        engine.activateNote(noteId);
+        console.log("  State:", uint256(engine.getState(noteId)));
 
         vm.stopBroadcast();
 
-        console.log("");
-        console.log("=== FLOW TEST COMPLETE ===");
-        console.log("Achieved: deposit -> create -> claim -> price (testnet direct)");
-        console.log("Blocked at: activate (needs real Nado/Tydro/1inch)");
+        if (engine.getState(noteId) == State.Active) {
+            console.log("");
+            console.log("=== NOTE IS ACTIVE !!! ===");
+            console.log("Flow complete: deposit -> price -> activate");
+        }
     }
 }

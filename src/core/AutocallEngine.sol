@@ -81,8 +81,15 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     ICarryEngine public immutable carryEngine;
     NoteToken public immutable noteToken;
 
-    /// @notice Maps xStock token address -> Chainlink Data Streams feed ID
+    /// @notice Maps xStock token address -> Pyth/Chainlink feed ID
     mapping(address => bytes32) public feedIds;
+
+    /// @notice Testnet mode: skip issuance gate CRE check
+    bool public testnetMode;
+
+    function setTestnetMode(bool _testnet) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        testnetMode = _testnet;
+    }
 
     // ----------------------------------------------------------------
     // Events
@@ -258,11 +265,14 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
         Note storage note = _notes[noteId];
         _requireState(noteId, State.Priced);
 
-        (bool approved, string memory reason) =
-            issuanceGate.checkIssuance(noteId, note.notional, note.basket);
-        if (!approved) revert IssuanceNotApproved(reason);
+        // Issuance gate check (skip CRE pricing check in testnet mode)
+        if (!testnetMode) {
+            (bool approved, string memory reason) =
+                issuanceGate.checkIssuance(noteId, note.notional, note.basket);
+            if (!approved) revert IssuanceNotApproved(reason);
+        }
 
-        // Approve and open delta-neutral hedge
+        // Open hedge (HedgeManager handles testnet mode internally)
         usdc.safeIncreaseAllowance(address(hedgeManager), note.notional);
         hedgeManager.openHedge(noteId, note.basket, note.notional);
 

@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import { Test } from "forge-std/Test.sol";
 import { IssuanceGate } from "../../src/pricing/IssuanceGate.sol";
 import { ICREConsumer, PricingResult } from "../../src/interfaces/ICREConsumer.sol";
+import { PricingParams } from "../../src/interfaces/IOptionPricer.sol";
 import { IHedgeManager } from "../../src/interfaces/IHedgeManager.sol";
 import { IReserveFund } from "../../src/interfaces/IReserveFund.sol";
 
@@ -20,6 +21,8 @@ contract MockCREConsumer is ICREConsumer {
         require(accepted[noteId], "pricing not accepted");
         return results[noteId];
     }
+
+    function registerNoteParams(bytes32, PricingParams calldata) external override {}
 }
 
 contract MockHedgeManager is IHedgeManager {

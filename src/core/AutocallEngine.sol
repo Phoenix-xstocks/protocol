@@ -8,6 +8,7 @@ import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/Saf
 import { State, IAutocallEngine } from "../interfaces/IAutocallEngine.sol";
 import { IHedgeManager } from "../interfaces/IHedgeManager.sol";
 import { ICREConsumer, PricingResult } from "../interfaces/ICREConsumer.sol";
+import { PricingParams } from "../interfaces/IOptionPricer.sol";
 import { IIssuanceGate } from "../interfaces/IIssuanceGate.sol";
 import { ICouponCalculator } from "../interfaces/ICouponCalculator.sol";
 import { IVolOracle } from "../interfaces/IVolOracle.sol";
@@ -187,6 +188,20 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
 
         noteIds.push(noteId);
         noteCount++;
+
+        // Auto-register note params on CREConsumer so CRE pricing can be accepted
+        creConsumer.registerNoteParams(
+            noteId,
+            PricingParams({
+                basket: basket,
+                kiBarrierBps: KI_BARRIER_BPS,
+                couponBarrierBps: COUPON_BARRIER_BPS,
+                autocallTriggerBps: AUTOCALL_TRIGGER_BPS,
+                stepDownBps: STEP_DOWN_BPS,
+                maturityDays: MATURITY_DAYS,
+                numObservations: MAX_OBSERVATIONS
+            })
+        );
 
         emit NoteCreated(noteId, holder, notional);
         // CRE workflow triggers on this event to start pricing

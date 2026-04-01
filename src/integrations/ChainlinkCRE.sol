@@ -74,6 +74,12 @@ contract ChainlinkCRE is ICREConsumer, IReceiver, ERC165, Ownable {
     }
 
     /// @inheritdoc ICREConsumer
+    function registerNoteParams(bytes32 noteId, PricingParams calldata params) external override {
+        pricingParams[noteId] = params;
+        emit PricingRequested(noteId);
+    }
+
+    /// @inheritdoc ICREConsumer
     function getAcceptedPricing(bytes32 noteId) external view returns (PricingResult memory) {
         return acceptedPricings[noteId];
     }

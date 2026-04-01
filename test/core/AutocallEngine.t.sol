@@ -593,7 +593,7 @@ contract AutocallEngineTest is Test {
 
         // Drop token C to 40% of initial (300e8 -> 120e8)
         priceFeed.setPrice(FEED_C, 120e8);
-        // worst perf = 120/300 * 10000 = 4000 bps (40%) < 50% KI barrier
+        // worst perf = 120/300 * 10000 = 4000 bps (40%) < 70% KI barrier
 
         // Run through all 6 observations (warp 30+ days between each)
         uint256 t = block.timestamp;
@@ -613,9 +613,9 @@ contract AutocallEngineTest is Test {
         bytes32 noteId = _createPriceAndActivate();
         usdc.mint(address(engine), 1_000_000e6);
 
-        // Set token B to 55% of initial (200e8 -> 110e8)
-        priceFeed.setPrice(FEED_B, 110e8);
-        // worst perf = 110/200 * 10000 = 5500 bps (55%) >= 50% KI, < 70% coupon
+        // Set token B to 75% of initial (200e8 -> 150e8)
+        priceFeed.setPrice(FEED_B, 150e8);
+        // worst perf = 150/200 * 10000 = 7500 bps (75%) >= 70% KI
 
         // Run through all 6 observations
         uint256 t = block.timestamp;
@@ -806,8 +806,8 @@ contract AutocallEngineTest is Test {
         bytes32 noteId = _createPriceAndActivate();
         usdc.mint(address(engine), 1_000_000e6);
 
-        // 55% perf — above KI (50%), below coupon barrier (70%)
-        priceFeed.setPrice(FEED_B, 110e8); // 55% of 200e8
+        // 75% perf — above KI (70%), above coupon barrier (70%)
+        priceFeed.setPrice(FEED_B, 150e8); // 75% of 200e8
 
         uint256 t = block.timestamp;
         for (uint256 i = 0; i < 6; i++) {

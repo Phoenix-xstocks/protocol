@@ -85,21 +85,18 @@ contract PythAdapter is Ownable {
 
         // Normalize to 8 decimals (Pyth uses variable expo, typically -8)
         int256 normalized;
-        if (p.expo >= 0) {
-            normalized = int256(p.price) * int256(10 ** uint32(p.expo));
+        // Normalize to 8 decimals. Pyth expo is typically negative (e.g., -8).
+        int32 targetExpo = -8;
+        if (p.expo == targetExpo) {
+            normalized = int256(p.price);
+        } else if (p.expo > targetExpo) {
+            // expo=-5, target=-8 → need MORE decimals → multiply by 10^(expo - target) = 10^3
+            uint256 diff = uint256(int256(p.expo - targetExpo));
+            normalized = int256(p.price) * int256(10 ** diff);
         } else {
-            // Already in negative expo, e.g., -8 means 8 decimals
-            // We want 8 decimals output. If expo is -8, price is already correct.
-            int32 targetExpo = -8;
-            if (p.expo == targetExpo) {
-                normalized = int256(p.price);
-            } else if (p.expo > targetExpo) {
-                // e.g., expo=-5, target=-8 → multiply by 10^3
-                normalized = int256(p.price) * int256(10 ** uint32(targetExpo - p.expo));
-            } else {
-                // e.g., expo=-10, target=-8 → divide by 10^2
-                normalized = int256(p.price) / int256(10 ** uint32(p.expo - targetExpo));
-            }
+            // expo=-10, target=-8 → need FEWER decimals → divide by 10^(target - expo) = 10^2
+            uint256 diff = uint256(int256(targetExpo - p.expo));
+            normalized = int256(p.price) / int256(10 ** diff);
         }
 
         price = int192(normalized);
@@ -116,12 +113,15 @@ contract PythAdapter is Ownable {
 
         // Normalize to 8 decimals
         int256 normalized;
-        if (p.expo == -8) {
+        int32 targetExpo = -8;
+        if (p.expo == targetExpo) {
             normalized = int256(p.price);
-        } else if (p.expo > -8) {
-            normalized = int256(p.price) * int256(10 ** uint32(-8 - p.expo));
+        } else if (p.expo > targetExpo) {
+            uint256 diff = uint256(int256(p.expo - targetExpo));
+            normalized = int256(p.price) * int256(10 ** diff);
         } else {
-            normalized = int256(p.price) / int256(10 ** uint32(p.expo + 8));
+            uint256 diff = uint256(int256(targetExpo - p.expo));
+            normalized = int256(p.price) / int256(10 ** diff);
         }
 
         price = int192(normalized);

@@ -1,87 +1,72 @@
 # xYield Protocol — Ce qu'il reste à faire
 
-## Protocoles externes (besoin d'adresses testnet)
+## FAIT ✅
 
-### Nado (Perp DEX)
-- [ ] Obtenir les adresses contrats testnet Ink Sepolia
-- [ ] Configurer les pair indexes (NVDA, TSLA, META)
-- [ ] Tester openShort / closeShort / claimFunding en live
-- [ ] **Modéliser les coûts de sortie** : spread taker/maker, slippage sur le carnet
-- [ ] Simuler les sorties de positions (unwinding) selon la taille
-- **Status** : Adapter (`NadoAdapter.sol`) prêt et testé avec mocks
+- [x] Pyth price feeds configurés (NVDA, TSLA, META feed IDs on-chain)
+- [x] PythAdapter déployé sur Ink Sepolia
+- [x] priceNoteDirect() — mode testnet sans CRE
+- [x] Full flow on-chain : deposit → create → claim → price ✅
+- [x] 30 xStock tokens déployés
+- [x] 339 tests (100% pass)
+- [x] VolOracle configuré (vols + correlations)
+- [x] Fee collection intégrée (0.6% au deposit)
+- [x] Euler V2 intégré pour reserve fund yield
+- [x] P2/P4 waterfall transfers fixés
 
-### Tydro (Lending, Aave v3 fork)
-- [ ] Obtenir les adresses contrats testnet Ink Sepolia (Pool, aTokens)
-- [ ] Tester depositCollateral / borrowUSDC / repayUSDC en live
-- [ ] Vérifier getLendingRate retourne des valeurs correctes
-- **Status** : Adapter (`TydroAdapter.sol`) prêt et testé avec mocks
+## Protocoles externes
 
-### Chainlink Data Streams
-- [ ] Obtenir les feed IDs pour NVDAx, TSLAx, METAx sur Ink
-- [ ] Configurer `engine.setFeedId()` pour chaque xStock
-- [ ] Tester `verifyAndCachePrice` avec un vrai signed report
-- **Status** : Adapter (`ChainlinkPriceFeed.sol`) prêt
+### Nado (Perp DEX) — ❌ NON INTÉGRABLE
+- Nado est un orderbook DEX, pas d'adresses de smart contracts publiques
+- On ne l'intègre PAS pour le hackathon
+- Le HedgeManager est prêt mais pas connecté
+- **Impact** : pas de hedge delta-neutre live. Le flow s'arrête à "Priced".
 
-### Chainlink CRE
-- [ ] Déployer le CRE workflow "xYield-Pricing" sur le DON
-- [ ] Déployer le CRE workflow "xYield-VolOracle"
-- [ ] Configurer le MC Pricer en HTTP mode (`npm run serve`)
-- [ ] Tester le flow complet : RequestPricing → CRE → fulfillPricing
-- [ ] **Alternative testnet** : ajouter un mode keeper direct qui bypass CRE
-- **Status** : Consumer (`CREConsumer.sol`) prêt, MC Pricer HTTP prêt
+### Tydro (Lending)
+- **Mainnet** : Pool `0x2816cf15F6d2A220E789aA011D5EE4eB6c47FEbA` (vérifié live)
+- **Testnet xStocks** : `feat-ink-sepolia-xstocks-tydro-app` (pas encore déployé)
+- Assets mainnet : WETH, USDT0, USDe, kBTC, INK, etc.
+- **Status** : Adapter prêt, adresses mainnet connues, fork testing possible
 
 ### Euler V2
-- [ ] Déployer un Euler vault USDC sur Ink (permissionless EVK)
-- [ ] Configurer `reserveFund.setEulerVault()`
-- [ ] Tester deposit/withdraw/yield en live
-- **Status** : Intégré dans `ReserveFund.sol`, testé avec mocks
+- Pas sur Ink directement (Base + BOB)
+- Intégré dans ReserveFund via ERC-4626 interface
+- Peut déployer un vault permissionless quand EVK arrive sur Ink
 
-### 1inch
-- [ ] Vérifier le router address sur Ink Sepolia
-- [ ] Tester les swaps USDC ↔ xStocks
-- **Status** : Adapter (`OneInchSwapper.sol`) prêt
+## Ce qui reste
 
----
+### Code
+- [ ] Frontend (Next.js + wagmi + viem)
+- [ ] Fork test avec Tydro mainnet
+- [ ] Script simulation coûts hedge
 
-## Code à compléter
+### Contacts
+- [ ] Tydro team : demander les adresses du testnet xStocks
+- [ ] Euler team : demander si EVK deployable sur Ink
+- [ ] 1inch : vérifier router sur Ink
 
-### Mode testnet (bypass CRE)
-- [ ] Ajouter `priceNoteDirect()` sur AutocallEngine : le keeper peut passer le pricing directement sans CRE, pour tester sans attendre le DON
-- [ ] Garder le flow CRE pour la prod
+## Adresses déployées (Ink Sepolia)
 
-### Coûts de hedge (question du juge Nado)
-- [ ] Modéliser le coût total du hedge : gas + slippage + spread taker/maker Nado
-- [ ] Simuler les sorties : pour un notional de $10k, quel est le slippage sur close ?
-- [ ] Intégrer le coût dans P4 (hedge operational costs) du waterfall
-- [ ] Documenter : coût estimé en bps par open/close/rebalance
+| Contrat | Adresse |
+|---------|---------|
+| AutocallEngine | `0xF2f32c1789b2318776023eA50C699A9E9e51AD51` |
+| XYieldVault | `0xE8f918b1E6046E9714Cb9052b292bDF6E81CfB1e` |
+| NoteToken | `0xDF4610F0732adaC6613F82EeAD44eeC35229421f` |
+| PythAdapter | `0x4C8763c2281aF3b181CD5eF2B3ebb1ebbE0663aB` |
+| CouponCalculator | `0x8D34506E70446d5ee1a8F8926d8B7209D4af9105` |
 
-### P2/P4 waterfall transfers
-- [ ] P2 (principal) et P4 (hedge costs) sont comptabilisés mais jamais transférés
-- [ ] Ajouter les safeTransfer vers les bons recipients
+## Pyth Feed IDs
 
-### Frontend
-- [ ] Next.js 14 + wagmi + viem + Tailwind
-- [ ] Pages : landing, deposit, notes, dashboard
-- [ ] CouponStreamCounter (temps réel)
-- [ ] ObservationTimeline (6 observations visuelles)
-- [ ] WorstOfChart (3 stocks vs barriers)
+| Asset | Feed ID |
+|-------|---------|
+| NVDAx | `0xb1073854ed24cbc755dc527418f52b7d271f6cc967bbf8d8129112b18860a593` |
+| TSLAx | `0x16dad506d7db8da01c87581c87ca897a012a153557d4d578c3b9c9e1bc0632f1` |
+| METAx | `0x78a3e3b8e676a8f73c439f5d749737034b139bbbe899ba5775216fba596607fe` |
 
----
+## Tydro Mainnet Addresses (Ink)
 
-## Questions du juge Nado à préparer
-
-1. **"Tu as simulé tes sorties ?"**
-   → On doit chiffrer : pour un notional de $10k sur 3 stocks, combien coûte le close en slippage sur Nado ?
-
-2. **"Taker / vs maker"**
-   → Notre hedge utilise des market orders (taker) pour ouvrir/fermer rapidement. Coût estimé : 5-10 bps par trade. Sur un open+close : ~20 bps total.
-
-3. **"Ton coût à toi"**
-   → Coût total du protocole par note :
-   - Fees : 0.6% (embedded + origination)
-   - Hedge open/close slippage : ~0.2%
-   - Gas (6 observations + settlement) : ~0.05%
-   - **Total : ~0.85% par note de 6 mois**
-
-4. **"Délai epoch / piggy bank"**
-   → Notre EpochManager a des cycles de 48h. Le withdraw de la reserve est permissionless et instantané. Pas de lock-up.
+| Contrat | Adresse |
+|---------|---------|
+| Pool | `0x2816cf15F6d2A220E789aA011D5EE4eB6c47FEbA` |
+| PoolAddressesProvider | `0x4172E6aAEC070ACB31aaCE343A58c93E4C70f44D` |
+| TydroOracle | `0x4758213271BFdC72224A7a8742dC865fC97756e1` |
+| DataProvider | `0x96086C25d13943C80Ff9a19791a40Df6aFC08328` |

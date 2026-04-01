@@ -6,8 +6,8 @@ out/
 /broadcast
 /broadcast/*/
 
-# Docs
-docs/
+# Docs (keep sources, ignore built output)
+docs/book/
 
 # Dotenv file
 .env

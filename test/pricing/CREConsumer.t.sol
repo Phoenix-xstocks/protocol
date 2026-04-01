@@ -51,7 +51,7 @@ contract CREConsumerTest is Test {
         basket[2] = address(0x3);
         return PricingParams({
             basket: basket,
-            kiBarrierBps: 5000,
+            kiBarrierBps: 7000,
             couponBarrierBps: 7000,
             autocallTriggerBps: 10000,
             stepDownBps: 200,
@@ -106,7 +106,7 @@ contract CREConsumerTest is Test {
         PricingParams memory params = _defaultParams();
         consumer.registerNoteParams(NOTE_1, params);
         PricingParams memory stored = consumer.getNoteParams(NOTE_1);
-        assertEq(stored.kiBarrierBps, 5000);
+        assertEq(stored.kiBarrierBps, 7000);
         assertEq(stored.couponBarrierBps, 7000);
         assertEq(stored.maturityDays, 180);
         assertEq(stored.basket.length, 3);

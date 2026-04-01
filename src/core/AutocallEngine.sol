@@ -40,7 +40,7 @@ contract AutocallEngine is IAutocallEngine, AccessControl, ReentrancyGuard {
     uint16 public constant COUPON_BARRIER_BPS = 7_000; // 70%
     uint16 public constant AUTOCALL_TRIGGER_BPS = 10_000; // 100%
     uint16 public constant STEP_DOWN_BPS = 200; // 2% per obs
-    uint16 public constant KI_BARRIER_BPS = 5_000; // 50%
+    uint16 public constant KI_BARRIER_BPS = 7_000; // 70%
     uint256 public constant MATURITY_DAYS = 180;
     uint256 public constant PRICE_MAX_STALENESS = 24 hours; // per spec section 15
     uint256 public constant KI_SETTLE_DEADLINE = 7 days; // holder must choose within 7 days

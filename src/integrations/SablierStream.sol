@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ISablierStream } from "../interfaces/ISablierStream.sol";
@@ -11,8 +12,11 @@ import { ISablierStream } from "../interfaces/ISablierStream.sol";
 ///         Replaces external Sablier V2 (not deployed on Ink). Each stream
 ///         linearly vests USDC from startTime to endTime. Holders call withdraw()
 ///         to claim; the owner (AutocallEngine) can cancel, returning unvested USDC.
-contract CouponStreamer is ISablierStream, Ownable {
+contract CouponStreamer is ISablierStream, Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
+
+    /// @notice Max streams per note (6 observations + safety margin)
+    uint256 public constant MAX_STREAMS_PER_NOTE = 12;
 
     // ----------------------------------------------------------------
     // Types
@@ -56,6 +60,7 @@ contract CouponStreamer is ISablierStream, Ownable {
     error StreamAlreadyCanceled(uint256 streamId);
     error NotRecipient();
     error NothingToWithdraw();
+    error TooManyStreams(bytes32 noteId);
 
     // ----------------------------------------------------------------
     // Constructor
@@ -81,6 +86,7 @@ contract CouponStreamer is ISablierStream, Ownable {
     ) external onlyOwner returns (uint256 streamId) {
         if (endTime <= startTime) revert InvalidTimeRange();
         if (monthlyAmount == 0) revert ZeroAmount();
+        if (_noteStreamIds[noteId].length >= MAX_STREAMS_PER_NOTE) revert TooManyStreams(noteId);
 
         // Pull USDC from caller (AutocallEngine)
         usdc.safeTransferFrom(msg.sender, address(this), monthlyAmount);
@@ -151,7 +157,7 @@ contract CouponStreamer is ISablierStream, Ownable {
     // ----------------------------------------------------------------
 
     /// @notice Withdraw vested USDC from a stream.
-    function withdraw(uint256 streamId) external {
+    function withdraw(uint256 streamId) external nonReentrant {
         Stream storage s = streams[streamId];
         if (msg.sender != s.recipient) revert NotRecipient();
 
